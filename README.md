@@ -401,7 +401,7 @@ cd linux-gw
 
 ### Шаг 1 — Скачать образ
 
-**[⬇ gateway.img.gz (≈809 МБ)](https://github.com/AnDyQnn/OpenWRT_AWG/releases/download/linux-gw-v2.9.0/gateway.img.gz)**
+**[⬇ gateway.img.gz (≈809 МБ)](https://github.com/AnDyQnn/OpenWRT_AWG/releases/download/linux-gw-v2.9.1/gateway.img.gz)**
 
 Распаковывать `.gz` вручную **не нужно** — Rufus сам разожмёт.
 
