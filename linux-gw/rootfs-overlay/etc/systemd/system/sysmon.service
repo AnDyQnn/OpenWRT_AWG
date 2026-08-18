@@ -1,0 +1,6 @@
+[Unit]
+Description=System monitor (service health check)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sysmon.sh

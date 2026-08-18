@@ -1,0 +1,7 @@
+[Unit]
+Description=AmneziaWG VPN watchdog (failover)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/vpn-watchdog.sh

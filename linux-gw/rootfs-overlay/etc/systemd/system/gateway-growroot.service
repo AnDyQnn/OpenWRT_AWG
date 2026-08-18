@@ -1,0 +1,12 @@
+[Unit]
+Description=Grow root partition+filesystem to fill disk
+After=local-fs.target
+Before=docker.service gateway-compose.service gateway-swap.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/gateway-growroot.sh
+
+[Install]
+WantedBy=multi-user.target

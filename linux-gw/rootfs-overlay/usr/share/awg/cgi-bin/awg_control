@@ -1,0 +1,51 @@
+#!/bin/sh
+printf 'Content-Type: application/json\r\n\r\n'
+
+je() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+json_err() { printf '{"ok":false,"msg":"%s"}' "$(je "$1")"; exit 0; }
+
+[ "$REQUEST_METHOD" = "POST" ] || json_err "POST required"
+CL=${CONTENT_LENGTH:-64}
+BODY=$(head -c "$CL")
+ACTION=$(printf '%s' "$BODY" | grep -oE 'action=[a-z_]+' | cut -d= -f2 | head -1)
+
+CONF="/etc/amnezia/awg0.conf"
+USER_MODE_FILE="/etc/awg-setup/user-mode"
+RUNTIME_MODE_FILE="/run/awg-mode"
+WLOG="/var/log/awg-watchdog.log"
+_wlog() { printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$WLOG"; }
+
+_up()   { WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go awg-quick up   "$CONF" >/dev/null 2>&1; }
+_down() { WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go awg-quick down "$CONF" >/dev/null 2>&1; }
+
+case "$ACTION" in
+    up)
+        _up &
+        printf '{"ok":true,"msg":"Поднимаем туннель..."}'
+        ;;
+    down)
+        _down &
+        printf '{"ok":true,"msg":"Отключаем туннель..."}'
+        ;;
+    restart)
+        (_down; sleep 2; _up) &
+        printf '{"ok":true,"msg":"Перезапускаем туннель..."}'
+        ;;
+    vpn_enable)
+        printf 'vpn\n' > "$USER_MODE_FILE"
+        rm -f "$RUNTIME_MODE_FILE"
+        _up &
+        _wlog "INFO VPN включён вручную (persistent)"
+        printf '{"ok":true,"msg":"VPN включён. Переживёт перезагрузку."}'
+        ;;
+    vpn_disable)
+        printf 'off\n'        > "$USER_MODE_FILE"
+        printf 'manual_off\n' > "$RUNTIME_MODE_FILE"
+        _down &
+        _wlog "INFO VPN отключён вручную (persistent)"
+        printf '{"ok":true,"msg":"VPN отключён. После перезагрузки не запустится."}'
+        ;;
+    *)
+        json_err "Неизвестное действие"
+        ;;
+esac

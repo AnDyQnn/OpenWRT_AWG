@@ -1,0 +1,50 @@
+#!/bin/sh
+# Принимает .conf файл, сохраняет, применяет через awg-quick.
+
+printf 'Content-Type: application/json\r\n\r\n'
+
+je() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+json_err() { printf '{"ok":false,"msg":"%s"}' "$(je "$1")"; exit 0; }
+
+[ "$REQUEST_METHOD" = "POST" ] || json_err "POST required"
+
+CL=${CONTENT_LENGTH:-0}
+[ "$CL" -gt 0 ] 2>/dev/null || json_err "Пустой запрос"
+
+BODY=$(dd bs=1 count="$CL" 2>/dev/null)
+
+# Извлекаем конфиг из multipart/form-data
+# Ищем блок [Interface] ... [Peer]
+CONF_CONTENT=$(printf '%s' "$BODY" | awk '
+    /\[Interface\]/{found=1}
+    found{
+        if(/^--.+--$/ && NR>3) exit
+        print
+    }
+')
+
+[ -z "$CONF_CONTENT" ] && json_err "Не найден [Interface] в конфиге"
+
+# Сохраняем
+mkdir -p /etc/amnezia
+printf '%s\n' "$CONF_CONTENT" > /etc/amnezia/awg0.conf
+chmod 600 /etc/amnezia/awg0.conf
+
+# Парсим параметры
+_get() { grep -E "^${1}\s*=" /etc/amnezia/awg0.conf | awk -F'[=]+' '{gsub(/^[ \t]+|[ \t]+$/,"",$2); print $2}' | head -1; }
+ADDR=$(_get Address); DNS=$(_get DNS); MTU=$(_get MTU)
+ENDPOINT=$(_get Endpoint); ALLOWED=$(_get AllowedIPs); KA=$(_get PersistentKeepalive)
+JC=$(_get Jc); JMIN=$(_get Jmin); JMAX=$(_get Jmax); S1=$(_get S1); S2=$(_get S2)
+IS_AWG="false"; [ -n "$JC" ] && IS_AWG="true"
+
+# Применяем туннель
+if ip link show awg0 >/dev/null 2>&1; then
+    WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go awg-quick down /etc/amnezia/awg0.conf 2>/dev/null || true
+    sleep 1
+fi
+(WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go awg-quick up /etc/amnezia/awg0.conf 2>/dev/null) &
+
+printf '{"ok":true,"addr":"%s","dns":"%s","mtu":"%s","endpoint":"%s","allowed":"%s","keepalive":"%s","is_awg":%s,"jc":"%s","jmin":"%s","jmax":"%s","s1":"%s","s2":"%s"}' \
+    "$(je "$ADDR")" "$(je "$DNS")" "$(je "$MTU")" "$(je "$ENDPOINT")" \
+    "$(je "$ALLOWED")" "$(je "$KA")" "$IS_AWG" \
+    "$(je "$JC")" "$(je "$JMIN")" "$(je "$JMAX")" "$(je "$S1")" "$(je "$S2")"

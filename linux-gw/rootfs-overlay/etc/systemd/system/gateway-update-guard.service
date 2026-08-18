@@ -1,0 +1,15 @@
+[Unit]
+Description=Gateway update dead-man guard (auto-rollback unfinished update on boot)
+# Должен отработать ДО подъёма стека: если накат прервался, сначала откатываемся,
+# потом gateway-compose поднимает уже рабочую (откатанную) версию.
+After=docker.service
+Requires=docker.service
+Before=gateway-compose.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/gateway-update-guard.sh
+
+[Install]
+WantedBy=multi-user.target

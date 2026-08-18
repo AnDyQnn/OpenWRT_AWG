@@ -1,0 +1,12 @@
+[Unit]
+Description=Print "Gateway ready" banner to console once containers are up
+After=gateway-compose.service
+Wants=gateway-compose.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/gateway-ready.sh
+
+[Install]
+WantedBy=multi-user.target

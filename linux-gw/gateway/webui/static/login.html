@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gateway Hub — Вход</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="login-body">
+    <canvas id="fx-bg" class="fx-bg"></canvas>
+    <div class="login-wrap">
+        <div class="login-box">
+            <div class="login-logo"><canvas id="login-logo" width="760" height="200"></canvas></div>
+            <div class="login-sub">Межсетевой экран</div>
+            <form id="login-form">
+                <input type="text" id="username" placeholder="Логин" autocomplete="username" required>
+                <input type="password" id="password" placeholder="Пароль" autocomplete="current-password" required>
+                <button type="submit" class="btn-primary">Войти</button>
+            </form>
+            <div id="login-error" class="login-error"></div>
+        </div>
+    </div>
+    <script src="/static/fx.js"></script>
+    <script>
+    GWFX.background(document.getElementById('fx-bg'), 'hi');
+    GWFX.runLogo(document.getElementById('login-logo'), 32);
+    GWFX.favicon();
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const err = document.getElementById('login-error');
+        err.textContent = '';
+        try {
+            const r = await fetch('/api/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    username: document.getElementById('username').value,
+                    password: document.getElementById('password').value,
+                })
+            });
+            const d = await r.json();
+            if (d.ok) { window.location.href = '/static/index.html'; }
+            else { err.textContent = d.error || 'Ошибка входа'; }
+        } catch (e) { err.textContent = 'Сервер недоступен'; }
+    });
+    </script>
+</body>
+</html>

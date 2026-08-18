@@ -1,0 +1,41 @@
+# VPN-конфиги содержат приватные ключи — никогда не коммитить
+*.conf
+
+# Исключение: тестовый конфиг с фиктивными ключами — безопасно
+!docker/test.conf
+
+# Артефакты сборки прошивки
+docker/output/
+
+# AWG пакеты для x86_64 — все .ipk кроме трёх нужных игнорируются
+docker/awg-pkgs-x86_64/*.ipk
+!docker/awg-pkgs-x86_64/kmod-amneziawg_*.ipk
+!docker/awg-pkgs-x86_64/amneziawg-tools_*.ipk
+!docker/awg-pkgs-x86_64/luci-proto-amneziawg_*.ipk
+
+# Python байткод / кеш
+__pycache__/
+*.py[cod]
+
+# OS / редактор
+.DS_Store
+Thumbs.db
+*.swp
+.vscode/
+
+# Собранные образы Linux-шлюза (большие, в Releases)
+linux-gw/output/
+linux-gw/test/*.img
+
+# Личные dev-скретч скрипты тестов (деплой/e2e) — не в репо
+linux-gw/test/_*
+
+# dnsmasq конфиг шлюза — не секрет, нужен для сборки
+!linux-gw/gateway/dnsmasq/dnsmasq.conf
+!linux-gw/gateway/webui/nginx.conf
+!linux-gw/rootfs-overlay/etc/dnsmasq.d/10-gateway.conf
+!linux-gw/rootfs-overlay/etc/modules-load.d/gateway.conf
+!linux-gw/rootfs-overlay/etc/ssh/sshd_config.d/10-gateway.conf
+
+# Личная инструкция (не в репо)
+linux-gw/test/КАК-ПРОТЕСТИТЬ-В-VIRTUALBOX.md

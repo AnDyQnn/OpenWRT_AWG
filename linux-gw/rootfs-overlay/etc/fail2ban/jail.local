@@ -1,0 +1,28 @@
+# Gateway fail2ban: защита от перебора паролей (SSH + веб-панель).
+# Бан добавляет DROP по IP в iptables (на все порты) на bantime.
+[DEFAULT]
+bantime  = 1h
+findtime = 10m
+maxretry = 5
+# баним на всех портах — забаненный не достучится ни по SSH, ни до панели
+banaction = iptables-allports
+# к стандартному бану добавляем запись в Журнал событий (вкладка «Журнал»)
+action = %(action_)s
+         gateway-journal
+# НИКОГДА не банить ПРИВАТНЫЕ адреса. Админ всегда приходит из локалки или через
+# VPN (а это всегда приватный IP), поэтому забанить себя физически невозможно —
+# банятся только публичные адреса (т.е. реальные атакующие из интернета).
+ignoreip = 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 100.64.0.0/10 169.254.0.0/16 ::1/128 fc00::/7 fe80::/10
+
+[sshd]
+enabled = true
+backend = systemd
+
+[gateway-panel]
+enabled  = true
+backend  = polling
+filter   = gateway-panel
+logpath  = /var/log/panel-auth.log
+maxretry = 5
+findtime = 10m
+bantime  = 1h

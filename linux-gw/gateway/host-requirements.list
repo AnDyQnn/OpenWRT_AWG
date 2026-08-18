@@ -1,0 +1,117 @@
+# Требования к ХОСТУ шлюза — единый источник правды.
+#
+# Этот файл читают ДВА потребителя, поэтому списки физически не могут разъехаться:
+#   1. linux-gw/Dockerfile      — сборка образа .img (ставит всё с нуля);
+#   2. gateway-update.sh        — накат по каналу upd-code (доставляет то, чего
+#                                 не хватает на уже развёрнутой машине).
+#
+# Зачем: in-place обновление синкает только код, конфиги и образы контейнеров —
+# apt-пакеты оно не ставило. Из-за этого на машинах, обновлённых по каналу (а не
+# перепрошитых), отсутствовал fail2ban: его jail.local приезжал, а демона не было.
+# Теперь любой новый host-пакет достаточно дописать сюда одной строкой.
+#
+# Формат (по строке на требование, инлайн-комментарии допустимы):
+#   pkg <имя>            пакет из репозиториев Debian
+#   pkg-docker <имя>     пакет из репозитория Docker CE (ставится после того,
+#                        как в sources.list.d добавлен download.docker.com)
+#   unit <имя>           systemd-юнит: должен быть enabled
+#   timer <имя>          то же + при накате ещё и запускается (start)
+#   file <путь> <режим>  файл обязан существовать (создаётся пустым)
+#
+# ВАЖНО про пакеты при накате: устанавливаются ТОЛЬКО отсутствующие. Уже стоящие
+# пакеты не апгрейдятся и не переконфигурируются — `apt-get upgrade` не зовётся
+# никогда, чтобы накат шлюза не превращался в обновление всей ОС.
+
+# ── базовые пакеты ──────────────────────────────────────────────────────────
+pkg apt-transport-https
+pkg ca-certificates
+pkg curl
+pkg gnupg
+
+# сеть и диагностика
+pkg iproute2
+pkg iptables
+pkg iputils-ping
+pkg ethtool
+pkg pciutils
+pkg dhcpcd5
+pkg openssh-server
+
+# защита от перебора паролей (jail.local лежит в rootfs-overlay/etc/fail2ban)
+pkg fail2ban
+pkg python3-systemd        # нужен жиле [sshd] с backend=systemd; иначе не стартует
+
+# система
+pkg systemd
+pkg systemd-sysv
+pkg systemd-timesyncd
+pkg tzdata
+pkg kmod
+pkg udev
+pkg linux-image-amd64
+
+# загрузчик и работа с диском
+pkg grub-efi-amd64
+pkg grub-efi-amd64-bin
+pkg grub-pc-bin
+pkg grub-common
+pkg util-linux
+pkg parted
+pkg dosfstools
+pkg e2fsprogs
+pkg rsync
+pkg gzip
+pkg cloud-guest-utils
+
+# консоль
+pkg console-setup
+pkg kbd
+pkg nano
+pkg less
+pkg bash-completion
+
+# firmware сетевых карт
+pkg firmware-linux-free
+pkg firmware-misc-nonfree
+pkg firmware-realtek
+pkg firmware-bnx2
+pkg firmware-bnx2x
+pkg firmware-atheros
+pkg firmware-libertas
+pkg firmware-intel-sound
+pkg firmware-iwlwifi
+
+# ── пакеты из репозитория Docker CE ─────────────────────────────────────────
+pkg-docker docker-ce
+pkg-docker docker-ce-cli
+pkg-docker containerd.io
+pkg-docker docker-compose-plugin
+
+# ── systemd-юниты, которые должны быть включены ─────────────────────────────
+unit docker
+unit ssh
+unit systemd-timesyncd
+unit fail2ban
+unit gateway-installer.service
+unit gateway-growroot.service
+unit gateway-swap.service
+unit gateway-init.service
+unit wan-detect.service
+unit gateway-compose.service
+unit gateway-ready.service
+unit client-traffic.service
+unit auto-timezone.service
+unit gateway-update-guard.service
+
+# таймеры: enable + start (при накате должны заработать сразу, без ребута)
+timer awg-watchdog.timer
+timer sysmon.timer
+timer weekly-report.timer
+timer gateway-backup.timer
+timer gateway-update.timer
+
+# ── файлы-предпосылки ───────────────────────────────────────────────────────
+# Лог неудачных входов в панель. Жила [gateway-panel] читает его polling-ом и без
+# существующего файла не поднимается. При загрузке его создаёт gateway-init.sh, но
+# при накате boot-time юниты не переисполняются — поэтому дублируем требование тут.
+file /var/log/panel-auth.log 640

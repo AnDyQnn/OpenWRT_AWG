@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gateway Hub</title>
+    <link rel="stylesheet" href="/static/xterm.css">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<canvas id="fx-bg" class="fx-bg"></canvas>
+<header class="topbar">
+    <div class="brand"><canvas id="topbar-shield" class="topbar-shield" width="92" height="92"></canvas><span class="brand-text">Gateway Hub</span></div>
+    <button id="nav-toggle" class="nav-toggle" aria-label="Меню"><span data-ic="menu"></span></button>
+    <nav>
+        <a href="#" data-tab="overview" class="active"><span data-ic="gauge"></span>Дашборд</a>
+        <a href="#" data-tab="network"><span data-ic="split"></span>Сеть</a>
+        <a href="#" data-tab="vpn"><span data-ic="lock"></span>VPN</a>
+        <a href="#" data-tab="access"><span data-ic="shield"></span>Доступ</a>
+        <a href="#" data-tab="console"><span data-ic="code"></span>Консоль</a>
+        <a href="#" data-tab="logs"><span data-ic="list"></span>Журнал</a>
+        <a href="#" data-tab="system"><span data-ic="gear"></span>Система</a>
+        <a href="#" data-tab="docs"><span data-ic="book"></span>Документация</a>
+    </nav>
+    <div id="clock"></div>
+    <a href="/logout" class="logout-btn">Выход →</a>
+</header>
+
+<main>
+    <!-- ══ Дашборд ══ -->
+    <section id="tab-overview" class="tab active">
+        <div class="dash-section"><span data-ic="monitor"></span>Железо</div>
+        <div class="kpi-row">
+            <div class="kpi" data-accent="blue">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="monitor"></span>CPU</span><span class="kpi-val" id="kpi-cpu">—</span></div>
+                <canvas class="spark" id="spark-cpu" width="280" height="48"></canvas>
+            </div>
+            <div class="kpi" data-accent="purple">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="box"></span>Память</span><span class="kpi-val" id="kpi-mem">—</span></div>
+                <canvas class="spark" id="spark-mem" width="280" height="48"></canvas>
+            </div>
+            <div class="kpi" data-accent="amber">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="warn"></span>Температура</span><span class="kpi-val" id="kpi-temp">—</span></div>
+                <canvas class="spark" id="spark-temp" width="280" height="48"></canvas>
+            </div>
+            <div class="kpi" data-accent="green">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="save"></span>Диск ⇅</span><span class="kpi-val small-val" id="kpi-disk">—</span></div>
+                <canvas class="spark" id="spark-disk" width="280" height="48"></canvas>
+            </div>
+        </div>
+        <div class="dash-section"><span data-ic="split"></span>Сеть</div>
+        <div class="kpi-row">
+            <div class="kpi" data-accent="green">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="split"></span>WAN ↓/↑</span><span class="kpi-val small-val" id="kpi-net">—</span></div>
+                <canvas class="spark" id="spark-net" width="280" height="48"></canvas>
+            </div>
+            <div class="kpi" data-accent="purple">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="lock"></span>VPN ↓/↑</span><span class="kpi-val small-val" id="kpi-vpn">—</span></div>
+                <canvas class="spark" id="spark-vpn" width="280" height="48"></canvas>
+            </div>
+            <div class="kpi" data-accent="blue">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="monitor"></span>LAN ↓/↑</span><span class="kpi-val small-val" id="kpi-lan">—</span></div>
+                <canvas class="spark" id="spark-lan" width="280" height="48"></canvas>
+            </div>
+            <div class="kpi" data-accent="amber">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="user"></span>Устройств</span><span class="kpi-val" id="kpi-dev">—</span></div>
+                <canvas class="spark" id="spark-dev" width="280" height="48"></canvas>
+            </div>
+        </div>
+        <div class="grid">
+            <div class="card">
+                <h3>Система</h3>
+                <div class="metric"><span>Хост</span><b id="sys-host">—</b></div>
+                <div class="metric"><span>Аптайм</span><b id="sys-uptime">—</b></div>
+                <div class="metric"><span>CPU</span><b id="sys-cpu">—</b></div>
+                <div class="metric"><span>Load 1/5/15</span><b id="sys-load">—</b></div>
+            </div>
+            <div class="card">
+                <h3>Память</h3>
+                <div class="bar"><div id="mem-bar" class="bar-fill"></div></div>
+                <div class="small" id="mem-text">—</div>
+                <h3 style="margin-top:1rem">Диск /</h3>
+                <div class="bar"><div id="disk-bar" class="bar-fill"></div></div>
+                <div class="small" id="disk-text">—</div>
+            </div>
+            <div class="card vpn-summary">
+                <h3>VPN <span id="vpn-dot" class="dot off"></span></h3>
+                <div class="metric"><span>Режим</span><b id="ov-vpn-mode">—</b></div>
+                <div class="metric"><span>Endpoint</span><b id="ov-vpn-endpoint">—</b></div>
+                <div class="metric"><span>Хэндшейк</span><b id="ov-vpn-hs">—</b></div>
+                <div class="metric"><span>Туннель IP</span><b id="ov-vpn-ip">—</b></div>
+            </div>
+            <div class="card">
+                <h3>Сеть</h3>
+                <div class="metric"><span>WAN порт</span><b id="ov-wan">—</b></div>
+                <div class="metric"><span>WAN IP</span><b id="ov-wan-ip">—</b></div>
+                <div class="metric"><span>LAN IP</span><b id="ov-lan-ip">—</b></div>
+                <div class="metric"><span>Устройств</span><b id="ov-devices">—</b></div>
+            </div>
+        </div>
+
+        <div class="dash-section" id="sec-section" style="display:none"><span data-ic="shield"></span>Безопасность</div>
+        <div class="kpi-row sec-kpi-row" id="sec-kpi-row" style="display:none">
+            <div class="kpi" data-accent="green" id="sec-tile-state">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="shield"></span>Состояние <span class="seg-q" title="Уровень активной угрозы. Штатно — угроз нет (или атакующий уже заблокирован). Подозрение — 2+ неудачных входа от одного адреса за 10 мин. Атака — 5+ (идёт активный подбор, вот-вот блокировка). Как только адрес заблокирован — угроза нейтрализована, состояние снова Штатно.">?</span></span></div>
+                <div class="sec-big" id="sec-level">—</div>
+            </div>
+            <div class="kpi" data-accent="amber">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="bug"></span>Заблокировано IP <span class="seg-q" title="Адреса, с которых выполнялся подбор пароля — система заблокировала их в межсетевом экране. Блокируются только публичные адреса; локальная сеть и VPN не затрагиваются.">?</span></span></div>
+                <div class="sec-big" id="sec-banned">0</div>
+            </div>
+            <div class="kpi" data-accent="blue">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="lock"></span>Отбито с интернета <span class="seg-q" title="Пакеты, которые фаервол сбросил со стороны WAN — попытки достучаться до шлюза снаружи.">?</span></span></div>
+                <div class="sec-big" id="sec-drops">0</div>
+            </div>
+            <div class="kpi" data-accent="purple">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="user"></span>Неудачных входов <span class="seg-q" title="Сколько раз неверно вводили логин/пароль в панель.">?</span></span></div>
+                <div class="sec-big" id="sec-fails">0</div>
+            </div>
+        </div>
+        <div id="sec-banned-list" class="sec-banned-list" style="display:none"></div>
+    </section>
+
+    <!-- ══ Сеть (интерфейсы · подключённые · DHCP/VLAN) ══ -->
+    <section id="tab-network" class="tab">
+        <div class="card">
+            <h3><span data-ic="split"></span>Сетевые интерфейсы</h3>
+            <table id="netif-table">
+                <thead><tr><th>Интерфейс</th><th>Роль</th><th>IP</th><th>Статус</th><th>Скорость (сейчас)</th><th>↓ RX всего</th><th>↑ TX всего</th></tr></thead>
+                <tbody id="netif-body"></tbody>
+            </table>
+            <div class="small" style="margin-top:0.8rem">
+                <b style="color:var(--accent)">WAN</b> — порт к провайдеру (вход интернета) ·
+                <b style="color:var(--good)">LAN</b> — мост к домашней сети (раздача) ·
+                <b style="color:var(--warn)">VPN</b> — зашифрованный туннель AmneziaWG
+            </div>
+        </div>
+
+        <div class="card">
+            <h3><span data-ic="monitor"></span>Подключённые устройства <span class="small">(аренды DHCP)</span></h3>
+            <table id="dev-table">
+                <thead><tr><th>IP</th><th>MAC</th><th>Имя</th><th>Скорость (сейчас)</th><th>Аренда до</th></tr></thead>
+                <tbody id="dev-body"></tbody>
+            </table>
+            <div id="dev-empty" class="small">Нет подключённых устройств</div>
+        </div>
+
+        <div class="card">
+            <h3><span data-ic="save"></span>DHCP — резервирование адресов и имена</h3>
+            <p class="small">Список собирается <b>сам</b> по всем устройствам в сети — ты только редактируешь.
+            Закрепи постоянный IP по MAC (DHCP-резерв) и имя — устройство всегда получит один адрес,
+            а правила доступа по нему будут стабильны. Так же удобно размечать сегменты сети (VLAN/подсети) по адресам.</p>
+            <div id="hosts-list" class="acc-list"></div>
+        </div>
+    </section>
+
+    <!-- ══ VPN ══ -->
+    <section id="tab-vpn" class="tab">
+        <div class="grid">
+            <div class="card">
+                <h3>Состояние туннеля <span id="vpn-dot2" class="dot off"></span></h3>
+                <div class="metric"><span>Режим</span><b id="vpn-mode">—</b></div>
+                <div class="metric"><span>Подключён</span><b id="vpn-connected">—</b></div>
+                <div class="metric"><span>Туннель IP</span><b id="vpn-ip">—</b></div>
+                <div class="metric"><span>Endpoint (сервер)</span><b id="vpn-endpoint">—</b></div>
+                <div class="metric"><span>Последний хэндшейк</span><b id="vpn-hs">—</b></div>
+                <div class="metric"><span>Трафик</span><b id="vpn-transfer">—</b></div>
+
+                <h3 style="margin-top:1.2rem">Основной режим</h3>
+                <p class="small">Сохраняется и переживает перезагрузку. Определяет — пускать ли трафик через VPN.</p>
+                <div class="btns">
+                    <button class="success" onclick="vpnMode('vpn_enable')"><span data-ic="lock"></span> Включить VPN</button>
+                    <button class="danger" onclick="vpnMode('vpn_disable')"><span data-ic="unlock"></span> Выключить (прямой интернет)</button>
+                </div>
+
+                <h3 style="margin-top:1.2rem">Перезапуск туннеля</h3>
+                <p class="small">Разовые действия, не меняют основной режим. Помогают если туннель завис.</p>
+                <div class="btns">
+                    <button onclick="vpnAction('up')" title="Установить соединение с VPN-сервером"><span data-ic="power"></span> Соединить</button>
+                    <button onclick="vpnAction('down')" title="Разорвать соединение с VPN-сервером"><span data-ic="plug"></span> Разъединить</button>
+                    <button onclick="vpnAction('restart')" title="Разъединить и соединить заново"><span data-ic="refresh"></span> Переподключить</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3>Конфиг AmneziaWG</h3>
+                <div class="tabs-mini">
+                    <button class="tab-mini active" data-ct="file" onclick="switchConfTab('file')">Файл .conf</button>
+                    <button class="tab-mini" data-ct="text" onclick="switchConfTab('text')">Вписать вручную</button>
+                </div>
+
+                <div id="ct-file" class="ct-pane active">
+                    <div id="drop" class="drop">
+                        Перетащи <code>.conf</code> сюда<br>или нажми для выбора
+                        <input type="file" id="conf-file" accept=".conf">
+                    </div>
+                </div>
+
+                <div id="ct-text" class="ct-pane">
+                    <textarea id="conf-textarea" class="conf-textarea" spellcheck="false"
+                        placeholder="[Interface]&#10;PrivateKey = ...&#10;Address = 10.x.x.x/32&#10;Jc = ...&#10;&#10;[Peer]&#10;PublicKey = ...&#10;Endpoint = host:port&#10;AllowedIPs = 0.0.0.0/0"></textarea>
+                    <div class="btns">
+                        <button class="success" onclick="applyConfText()">Применить конфиг</button>
+                        <button onclick="loadCurrentConf()">Загрузить текущий</button>
+                    </div>
+                </div>
+
+                <div id="conf-result" class="small" style="margin-top:0.6rem"></div>
+
+                <h3 style="margin-top:1.2rem">Скачать конфиг</h3>
+                <p class="small">Текущий — активный (нормализован: весь трафик в VPN, рулит шлюз). Исходный — как залили (с оригинальным AllowedIPs). Файл содержит приватный ключ.</p>
+                <div class="btns">
+                    <button onclick="downloadConf('current')"><span data-ic="import"></span> Текущий (.conf)</button>
+                    <button onclick="downloadConf('original')"><span data-ic="import"></span> Исходный (.conf)</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <h3><span data-ic="split"></span>Раздельное туннелирование</h3>
+                <p class="small">Что идёт <b style="color:var(--good)">напрямую</b> мимо туннеля (банки, госуслуги, локальные сервисы). Остальное — через VPN. <b>Впиши только ссылку</b> — её адреса соберутся сами и замаршрутизируются. Адреса <b>перерезолвятся автоматически раз в час</b> (кнопка «↻ адреса» — вручную). Исходный ключ содержал <b id="vpn-route-count">—</b> диапазонов.</p>
+                <div class="grp-create">
+                    <input type="text" id="split-new" class="access-input" placeholder="ссылка — например vtb.ru или gosuslugi.ru" onkeydown="if(event.key==='Enter')splitCreate()">
+                    <button class="success" onclick="splitCreate()">+ Напрямую</button>
+                </div>
+                <div id="split-result" class="small" style="margin-top:.3rem"></div>
+                <div id="split-list" class="acc-list"></div>
+
+                <div class="btns" style="margin-top:.8rem">
+                    <button type="button" onclick="splitExport()"><span data-ic="import"></span> Экспорт JSON</button>
+                    <button type="button" class="filebtn" onclick="document.getElementById('split-import-file').click()"><span data-ic="upload"></span> Импорт JSON</button>
+                    <input type="file" id="split-import-file" accept=".json,application/json" style="display:none">
+                </div>
+                <div id="split-import-result" class="small" style="margin-top:.4rem"></div>
+
+                <details id="routed-box" style="margin-top:0.9rem; display:none">
+                    <summary class="small">Обход, зашитый в ключ — <span id="routed-count">0</span> диапазонов (дырки)</summary>
+                    <p class="small">Эти адреса в ключе шли <b style="color:var(--good)">напрямую</b> (дырки в AllowedIPs). При загрузке ключа они <b>собираются в список выше автоматически</b> — с дедупом и схлопыванием. Кнопка — пересобрать вручную.</p>
+                    <div class="btns">
+                        <button class="success" onclick="splitFromKey()"><span data-ic="import"></span> Собрать обход из ключа</button>
+                    </div>
+                    <div id="split-fromkey-result" class="small" style="margin-top:.3rem"></div>
+                    <div id="routed-list" class="access-list" style="margin-top:.3rem"></div>
+                </details>
+            </div>
+        </div>
+    </section>
+
+    <!-- ══ Доступ (межсетевой экран: группы + правила) ══ -->
+    <section id="tab-access" class="tab">
+        <p class="small access-intro">Управление доступом устройств. По умолчанию открыт <b>весь</b> интернет.
+        Создай группу, добавь в неё сайты (адреса подтянутся сами) и укажи, кому её резать — всем или
+        конкретным устройствам. Настройка самого VPN (что идёт мимо туннеля) — на вкладке <b>VPN</b>,
+        резервы адресов и имена — на вкладке <b>Сеть</b>.</p>
+
+        <div class="card">
+            <h3><span data-ic="box"></span>Группы и блокировки</h3>
+            <p class="small">Группа = набор сайтов + кому блокировать. Имя и описание — по желанию. Впиши адрес
+            (<code>youtube.com</code>) — набор доменов сервиса подтянется сам, ничего разворачивать не надо.</p>
+            <div class="grp-create">
+                <input type="text" id="grp-new-name" class="access-input" placeholder="Название группы (необязательно)">
+                <input type="text" id="grp-new-desc" class="access-input" placeholder="Описание (необязательно)">
+                <button class="success" onclick="grpCreate()">+ Создать группу</button>
+            </div>
+            <div id="grp-create-result" class="small" style="margin-top:.4rem"></div>
+            <div id="groups-list" class="acc-list"></div>
+        </div>
+
+        <div class="card">
+            <h3><span data-ic="save"></span>Импорт / экспорт правил</h3>
+            <p class="small">Весь набор (группы с блокировками, устройства, раздельное туннелирование) одним JSON — для переноса между шлюзами или бэкапа.</p>
+            <div class="btns">
+                <button type="button" onclick="accessExport()"><span data-ic="import"></span> Экспорт JSON</button>
+                <button type="button" class="filebtn" onclick="document.getElementById('access-import-file').click()"><span data-ic="upload"></span> Импорт JSON</button>
+                <input type="file" id="access-import-file" accept=".json,application/json" style="display:none">
+            </div>
+            <div id="import-result" class="small" style="margin-top:.4rem"></div>
+        </div>
+    </section>
+
+    <!-- ══ Консоль (интерактивный терминал шлюза) ══ -->
+    <section id="tab-console" class="tab">
+        <div class="term-wrap">
+            <div class="card term-card">
+                <div class="term-head">
+                    <h3 style="margin:0"><span data-ic="code"></span>Консоль шлюза</h3>
+                    <span id="term-status" class="term-status off">отключено</span>
+                    <span class="term-spacer"></span>
+                    <button class="mini" id="term-connect-btn" onclick="termConnect()">Подключить</button>
+                    <button class="mini" onclick="termClear()">Очистить</button>
+                </div>
+                <p class="small">Полноценный shell самого шлюза с приветствием — как обычная консоль. Вход —
+                <b>учётными данными панели</b> (теми же, что и в дашборд). Доступен из LAN и через VPN.
+                Будьте аккуратны — это полный доступ к системе.</p>
+                <div id="terminal" class="terminal"></div>
+            </div>
+
+            <aside class="card term-hints">
+                <h3><span data-ic="list"></span>Подсказки команд</h3>
+                <p class="small">Сначала войди в консоль (логин/пароль), затем нажми подсказку — команда подставится, проверь и нажми Enter.</p>
+                <div class="hint" onclick="termCmd('gateway-status')"><b>Общий статус шлюза</b><code class="hint-cmd">gateway-status</code></div>
+                <div class="hint" onclick="termCmd('docker ps')"><b>Контейнеры</b><code class="hint-cmd">docker ps</code></div>
+                <div class="hint" onclick="termCmd('docker exec gw-awg awg show')"><b>Состояние VPN-туннеля</b><code class="hint-cmd">awg show</code></div>
+                <div class="hint" onclick="termCmd('ip -br a')"><b>Интерфейсы и адреса</b><code class="hint-cmd">ip -br a</code></div>
+                <div class="hint" onclick="termCmd('ip route')"><b>Таблица маршрутизации</b><code class="hint-cmd">ip route</code></div>
+                <div class="hint" onclick="termCmd('cat /var/log/awg-watchdog.log')"><b>Журнал failover / VPN</b><code class="hint-cmd">cat awg-watchdog.log</code></div>
+                <div class="hint" onclick="termCmd('cat /var/lib/misc/dnsmasq.leases')"><b>Аренды DHCP (устройства)</b><code class="hint-cmd">cat dnsmasq.leases</code></div>
+                <div class="hint" onclick="termCmd('free -h; df -h /')"><b>Память и диск</b><code class="hint-cmd">free -h; df -h /</code></div>
+                <div class="hint" onclick="termCmd('sensors 2>/dev/null || cat /sys/class/thermal/thermal_zone*/temp')"><b>Температура CPU</b><code class="hint-cmd">sensors</code></div>
+                <div class="hint" onclick="termCmd('systemctl --failed')"><b>Упавшие сервисы</b><code class="hint-cmd">systemctl --failed</code></div>
+            </aside>
+        </div>
+    </section>
+
+    <!-- ══ Журнал ══ -->
+    <section id="tab-logs" class="tab">
+        <div class="card" id="report-card" style="display:none">
+            <h3><span data-ic="gauge"></span>Еженедельный отчёт</h3>
+            <p class="small">Формируется автоматически по воскресеньям (аптайм VPN, failover, рестарты). Журнал самоочищается — ротация при росте свыше 1 МБ (последние 2000 строк).</p>
+            <div class="grid">
+                <div class="metric"><span>Аптайм VPN</span><b id="rep-uptime">—</b></div>
+                <div class="metric"><span>Failover за период</span><b id="rep-failover">—</b></div>
+                <div class="metric"><span>Восстановлений VPN</span><b id="rep-recovery">—</b></div>
+                <div class="metric"><span>Рестартов сервисов</span><b id="rep-restarts">—</b></div>
+                <div class="metric"><span>Устройств</span><b id="rep-devices">—</b></div>
+                <div class="metric"><span>Сформирован</span><b id="rep-generated">—</b></div>
+            </div>
+        </div>
+        <div class="card">
+            <h3>Журнал событий <button class="mini" onclick="loadLogs()"><span data-ic="refresh"></span></button></h3>
+            <div class="small" style="margin-bottom:0.6rem">
+                <span style="color:var(--good)">●</span> OK — успех ·
+                <span style="color:var(--warn)">●</span> WARN — предупреждение ·
+                <span style="color:var(--bad)">●</span> ERR — ошибка ·
+                <span style="color:var(--fg)">●</span> INFO — информация
+            </div>
+            <div id="log-box" class="log-box"></div>
+        </div>
+    </section>
+
+    <!-- ══ Система (Безопасность · Справка · О проекте) ══ -->
+    <section id="tab-system" class="tab">
+        <div class="subnav" id="sys-subnav">
+            <a href="#" class="subnav-link active" data-sys="security">Безопасность</a>
+            <a href="#" class="subnav-link" data-sys="update" id="sys-update-link" style="display:none">Обновление</a>
+            <a href="#" class="subnav-link" data-sys="help">Справка</a>
+            <a href="#" class="subnav-link" data-sys="about">О проекте</a>
+        </div>
+
+        <!-- Безопасность -->
+        <div class="sys-panel active" id="sys-security">
+            <div class="grid">
+                <div class="card" style="max-width:480px">
+                    <h3><span data-ic="lock"></span>Смена пароля дашборда</h3>
+                    <p class="small">Текущий логин: <b id="cur-user">—</b></p>
+                    <form id="creds-form" onsubmit="changeCreds(event)">
+                        <input type="password" id="cur-pass" placeholder="Текущий пароль" required>
+                        <input type="text" id="new-user" placeholder="Новый логин" autocomplete="username" required>
+                        <input type="password" id="new-pass" placeholder="Новый пароль (мин. 4 символа)" autocomplete="new-password" required>
+                        <button type="submit" class="success">Сохранить</button>
+                    </form>
+                    <div id="creds-result" class="small" style="margin-top:0.8rem"></div>
+                </div>
+                <div class="card">
+                    <h3><span data-ic="shield"></span>Доступы и пароли</h3>
+                    <div class="metric"><span>Дашборд (веб-панель)</span><b>https://192.168.88.1 · admin / admin</b></div>
+                    <div class="metric"><span>Встроенная консоль</span><b>те же креды панели (admin / admin)</b></div>
+                    <div class="metric"><span>SSH (внешний клиент)</span><b>root@192.168.88.1 · openwrt</b></div>
+                    <p class="small" style="margin-top:0.8rem">
+                        <span data-ic="lock"></span> <b>Встроенная консоль</b> (вкладка «Консоль») спрашивает
+                        <b>логин/пароль панели</b> — те же, что и для входа в дашборд (не путать с SSH-паролем
+                        <code>openwrt</code>, он только для внешнего SSH-клиента).
+                    </p>
+                    <p class="small">
+                        <span data-ic="warn"></span> Панель доступна только из LAN и через VPN, порт 80 закрыт с WAN.
+                        Смени пароль панели (выше слева) и SSH-пароль (<code>passwd</code> в консоли).
+                    </p>
+                </div>
+            </div>
+
+            <div class="card" id="accounts-card" style="display:none; margin-top:1rem">
+                <h3><span data-ic="user"></span>Учётные записи панели</h3>
+                <p class="small">Заводите отдельные учётки для администраторов и пользователей. Сброс пароля
+                и удаление подтверждаются <b>вашим паролем администратора</b> (восстановление доступа).</p>
+                <div id="users-list" class="acc-list"></div>
+                <h3 style="margin-top:1rem">Новая учётная запись</h3>
+                <div class="grp-create">
+                    <input type="text" id="nu-name" class="access-input" placeholder="Логин" autocomplete="off">
+                    <input type="password" id="nu-pass" class="access-input" placeholder="Пароль (мин. 4)" autocomplete="new-password">
+                    <select id="nu-role" class="access-input" style="flex:0 0 150px">
+                        <option value="user">Модератор (только просмотр)</option>
+                        <option value="admin">Администратор (полный доступ)</option>
+                    </select>
+                    <input type="password" id="nu-admin" class="access-input" placeholder="Ваш пароль (админ)" autocomplete="off">
+                    <button class="success" onclick="userCreate()">+ Создать</button>
+                </div>
+                <div id="nu-result" class="small" style="margin-top:0.4rem"></div>
+            </div>
+
+            <div class="card" id="backups-card" style="display:none; margin-top:1rem">
+                <h3><span data-ic="save"></span>Резервные копии</h3>
+                <p class="small">Снимок состояния шлюза (VPN-конфиг и ключи, правила доступа, учётки, аренды DHCP).
+                Создаётся <b>ежедневно автоматически</b> и перед обновлениями; можно создать вручную, скачать,
+                восстановить или загрузить чужой. <span data-ic="warn"></span> Содержит <b>приватные ключи</b> — храните бережно.</p>
+                <div class="btns">
+                    <button class="success" onclick="backupCreate()"><span data-ic="save"></span> Создать бэкап</button>
+                    <button class="filebtn" onclick="document.getElementById('backup-upload-file').click()"><span data-ic="upload"></span> Загрузить бэкап</button>
+                    <input type="file" id="backup-upload-file" accept=".gz,application/gzip" style="display:none">
+                </div>
+                <div id="backup-result" class="small" style="margin-top:0.4rem"></div>
+                <div id="backups-list" class="acc-list" style="margin-top:0.6rem"></div>
+            </div>
+
+            <div class="card" id="power-card" style="display:none; margin-top:1rem">
+                <h3><span data-ic="power"></span>Питание и обслуживание</h3>
+                <p class="small">Управление шлюзом из панели. Перезагрузка/выключение разрывают связь через
+                туннель на время недоступности. Доступно только администратору, действия пишутся в журнал.</p>
+                <div class="btns">
+                    <button onclick="sysRestartServices()"><span data-ic="refresh"></span> Перезапустить сервисы</button>
+                    <button class="danger" onclick="sysReboot()"><span data-ic="power"></span> Перезагрузить шлюз</button>
+                    <button class="danger" onclick="sysPoweroff()"><span data-ic="plug"></span> Выключить шлюз</button>
+                </div>
+                <p class="small" style="margin-top:0.6rem"><span data-ic="warn"></span> <b>Перезапуск сервисов</b> — мягко
+                (VPN/DHCP/панель, без перезагрузки ОС). <b>Перезагрузка</b> — шлюз вернётся сам через ~1–2 мин.
+                <b>Выключение</b> — после него включить шлюз можно будет <b>только физически</b> (удалённо — нет),
+                требует ввода слова «выключить».</p>
+            </div>
+
+            <div class="card" id="ssh-card" style="display:none; margin-top:1rem">
+                <h3><span data-ic="code"></span>SSH-доступ (консоль администратора)</h3>
+                <p class="small">Вход в shell сервера по SSH. Со стороны интернета (WAN) порт <b>закрыт фаерволом</b> —
+                заходить только из локальной сети или через VPN-туннель. Нестандартный порт уменьшает шум от ботов.</p>
+                <div class="grp-create" style="align-items:center">
+                    <span class="small">Текущий порт:&nbsp;<b id="ssh-port-cur">—</b></span>
+                    <input id="ssh-port-new" class="access-input" type="number" min="1" max="65535" placeholder="новый порт (напр. 23232)" style="flex:0 0 220px">
+                    <button class="success" onclick="sshPortChange()"><span data-ic="save"></span> Изменить порт</button>
+                </div>
+                <div id="ssh-port-result" class="small" style="margin-top:0.4rem"></div>
+                <p class="small" style="margin-top:0.4rem"><span data-ic="warn"></span> Смена порта подтверждается
+                <b>паролем администратора</b>. Текущие SSH-сессии не оборвутся; новый порт — для новых подключений.
+                После смены подключайся к новому порту: <code>ssh -p ПОРТ root@192.168.88.1</code>.</p>
+            </div>
+
+            <div class="card" id="console-card" style="display:none; margin-top:1rem">
+                <h3><span data-ic="lock"></span>Консоль и SSH — пароль и ключи</h3>
+                <p class="small">Доступ к shell сервера по SSH (логин <b>root</b>). Два способа входа — можно
+                использовать любой или оба: по <b>паролю</b> или по <b>SSH-ключу</b>.</p>
+
+                <h3 style="margin-top:.8rem; font-size:.95rem">Пароль root (для входа по SSH)</h3>
+                <div class="grp-create">
+                    <input type="password" id="root-pass-new" class="access-input" style="flex:0 0 240px" placeholder="новый пароль root (мин. 6)">
+                    <button class="success" onclick="rootPassChange()"><span data-ic="save"></span> Сменить пароль</button>
+                </div>
+                <div id="root-pass-result" class="small" style="margin-top:.3rem"></div>
+
+                <h3 style="margin-top:1rem; font-size:.95rem">SSH-ключи <span class="seg-q" title="Публичный ключ — это «замок», который кладётся на сервер; приватный (секретный) остаётся у тебя на компе. Сервер пускает того, у кого есть парный приватный ключ — пароль вводить не нужно. Это надёжнее пароля (нечего подобрать).">?</span></h3>
+                <div id="ssh-keys-list" class="acc-list"></div>
+                <div class="btns" style="margin-top:.6rem">
+                    <button class="success" onclick="sshKeyGen()"><span data-ic="plus"></span> Сгенерировать ключ на сервере</button>
+                </div>
+                <p class="small" style="margin-top:.4rem">Проще всего — <b>сгенерировать ключ прямо здесь</b>: сервер создаст пару,
+                публичную часть добавит сам, а <b>приватный файл скачается тебе</b> (на сервере он не хранится). Сохрани файл —
+                им и заходишь: <code>ssh -i файл -p 23232 root@192.168.88.1</code>.</p>
+                <p class="small" style="margin-top:.5rem; opacity:.8">Либо вставь готовый публичный ключ (со своего компа,
+                <code>ssh-keygen -t ed25519</code> → <code>~/.ssh/id_ed25519.pub</code>):</p>
+                <div class="grp-create">
+                    <input type="text" id="ssh-key-new" class="access-input" style="flex:1 1 320px" placeholder="ssh-ed25519 AAAA… комментарий">
+                    <button onclick="sshKeyAdd()"><span data-ic="plus"></span> Добавить ключ</button>
+                </div>
+                <div id="ssh-key-result" class="small" style="margin-top:.3rem"></div>
+                <p class="small" style="margin-top:.5rem"><span data-ic="warn"></span> Смена пароля root подтверждается
+                <b>паролем администратора панели</b>. SSH со стороны интернета закрыт фаерволом — вход только из локальной
+                сети или через VPN.</p>
+            </div>
+        </div>
+
+        <!-- Обновление -->
+        <div class="sys-panel" id="sys-update">
+            <div class="card">
+                <h3><span data-ic="refresh"></span>Обновление шлюза</h3>
+                <div class="metric"><span>Текущая версия</span><b id="upd-current">—</b></div>
+                <div class="metric"><span>Доступная версия</span><b id="upd-available">—</b></div>
+                <div id="upd-changelog" class="small" style="margin:0.4rem 0; display:none"></div>
+                <div class="btns" style="margin-top:0.6rem">
+                    <button onclick="updateCheck()"><span data-ic="refresh"></span> Проверить обновления</button>
+                    <button class="success" id="upd-apply-btn" onclick="updateApply()" style="display:none"><span data-ic="download"></span> Обновить сейчас</button>
+                </div>
+                <div id="upd-progress" class="small" style="margin-top:0.6rem"></div>
+                <p class="small" style="margin-top:0.4rem"><span data-ic="shield"></span> Перед обновлением автоматически
+                создаётся бэкап; при сбое самодиагностики шлюз сам откатывается на предыдущую версию. Обновление
+                идёт по защищённому каналу (образы проверяются по контрольной сумме).</p>
+            </div>
+
+            <div class="card" style="margin-top:1rem">
+                <h3><span data-ic="gear"></span>Режим обновлений</h3>
+                <div class="grp-create" style="flex-wrap:wrap">
+                    <select id="upd-mode" class="access-input" style="flex:0 0 200px" onchange="updateModeUi()">
+                        <option value="manual">Только вручную</option>
+                        <option value="nightly">Ночью (04:00–05:00)</option>
+                        <option value="scheduled">По расписанию</option>
+                    </select>
+                    <input type="time" id="upd-time" class="access-input" style="flex:0 0 130px; display:none" value="04:30">
+                    <span id="upd-level-lbl" class="small" style="display:none; align-self:center">Ставить:</span>
+                    <select id="upd-level" class="access-input" style="flex:0 0 210px; display:none"
+                            title="Все версии — любые обновления. Только патчи — мелкие (X.Y.*), без крупных изменений.">
+                        <option value="all">Все версии (вкл. крупные)</option>
+                        <option value="patch">Только патчи (мелкие X.Y.*)</option>
+                    </select>
+                    <input type="number" id="upd-keep" class="access-input" style="flex:0 0 150px" min="1" max="20" value="3" title="Сколько резервных копий хранить">
+                    <button class="success" onclick="updateConfigSave()">Сохранить</button>
+                </div>
+                <div id="upd-cfg-result" class="small" style="margin-top:0.4rem"></div>
+                <p class="small" style="margin-top:0.4rem"><span data-ic="warn"></span> Безопасный режим по умолчанию —
+                <b>только вручную</b>. Авто-режимы накатывают обновление сами (раз в сутки в заданное окно).
+                «Только патчи» — авто-режим поставит лишь мелкие версии (исправления), а крупные обновления оставит на ручное подтверждение.</p>
+            </div>
+
+            <div class="card" style="margin-top:1rem">
+                <h3><span data-ic="undo"></span>Откат</h3>
+                <p class="small">Вернуться на предыдущую версию (страховка хранится до следующего обновления).
+                Восстанавливает и код, и состояние «как было».</p>
+                <button class="danger" onclick="updateRollback()"><span data-ic="undo"></span> Откатиться на предыдущую</button>
+                <div id="upd-rollback-result" class="small" style="margin-top:0.4rem"></div>
+            </div>
+        </div>
+
+        <!-- Справка -->
+        <div class="sys-panel" id="sys-help">
+            <div class="help-nav">
+                <a href="#" class="help-link active" data-help="start">Быстрый старт</a>
+                <a href="#" class="help-link" data-help="vpn-modes">Режимы VPN</a>
+                <a href="#" class="help-link" data-help="network">Как читать «Сеть»</a>
+                <a href="#" class="help-link" data-help="devices">Устройства и скорости</a>
+                <a href="#" class="help-link" data-help="access">Доступ и фильтрация</a>
+                <a href="#" class="help-link" data-help="console">Консоль и учётки</a>
+                <a href="#" class="help-link" data-help="logs">Как читать журнал</a>
+                <a href="#" class="help-link" data-help="failover">Failover (защита от сбоев)</a>
+                <a href="#" class="help-link" data-help="install">Установка на диск</a>
+                <a href="#" class="help-link" data-help="faq">Частые вопросы</a>
+            </div>
+
+            <div class="help-content">
+                <div class="help-block active" id="help-start">
+                    <h3>Быстрый старт</h3>
+                    <ol>
+                        <li>Подключи кабель провайдера в <b>любой</b> порт ПК — WAN определится сам.</li>
+                        <li>Подключи другой порт к роутеру / коммутатору / ПК — это будет LAN (раздача).</li>
+                        <li>Открой <code>http://192.168.88.1</code> и зайди (<code>admin / admin</code>).</li>
+                        <li>Вкладка <b>VPN</b> → загрузи <code>.conf</code> AmneziaWG.</li>
+                        <li>Готово — весь трафик идёт через зашифрованный туннель.</li>
+                    </ol>
+                    <p class="small">Шлюзу неважно, что на входе и выходе: провайдер может быть кабель/PPPoE, потребитель — роутер, коммутатор или один компьютер.</p>
+                    <p class="small"><span data-ic="book"></span> Полная техническая документация — вкладка <b>«Документация»</b> (архитектура, сборка, установка, VPN, доступ, диагностика).</p>
+                </div>
+
+                <div class="help-block" id="help-vpn-modes">
+                    <h3>Режимы VPN</h3>
+                    <table class="help-table">
+                        <tr><td><b style="color:var(--good)">VPN активен</b></td><td>Туннель поднят, есть свежий хэндшейк — трафик шифруется.</td></tr>
+                        <tr><td><b style="color:var(--warn)">Прямой (failover)</b></td><td>VPN-сервер недоступен — трафик идёт напрямую, система каждые 5 мин пробует восстановить.</td></tr>
+                        <tr><td><b style="color:var(--muted)">Выключен вручную</b></td><td>Ты нажал «Выключить VPN» — трафик идёт напрямую, авто-восстановления нет.</td></tr>
+                        <tr><td><b>Нет конфига</b></td><td>Файл <code>.conf</code> ещё не загружен.</td></tr>
+                    </table>
+                    <h3 style="margin-top:1rem">Кнопки</h3>
+                    <p><b><span data-ic="lock"></span> Включить VPN / <span data-ic="unlock"></span> Выключить</b> — основной режим, сохраняется навсегда (переживает перезагрузку).</p>
+                    <p><b>▲ Соединить / ▼ Разъединить / ↻ Переподключить</b> — разовые действия для туннеля, режим не меняют. Используй если туннель завис.</p>
+                </div>
+
+                <div class="help-block" id="help-network">
+                    <h3>Как читать вкладку «Сеть»</h3>
+                    <table class="help-table">
+                        <tr><td><b style="color:var(--accent)">WAN</b></td><td>Порт к провайдеру — отсюда приходит интернет.</td></tr>
+                        <tr><td><b style="color:var(--good)">LAN (br-lan)</b></td><td>Мост раздачи, IP <code>192.168.88.1</code>. Сюда подключаются устройства.</td></tr>
+                        <tr><td><b style="color:var(--warn)">VPN (awg0)</b></td><td>Виртуальный интерфейс туннеля. IP вида <code>10.x.x.x</code>.</td></tr>
+                    </table>
+                    <p class="small"><b>Скорость (сейчас)</b> — живой поток в этот момент (<span style="color:var(--good)">↓</span> скачивание, <span style="color:var(--accent)">↑</span> отдача), считается по приросту трафика. <b>↓ RX всего / ↑ TX всего</b> — суммарно принято/отправлено с момента загрузки.</p>
+                </div>
+
+                <div class="help-block" id="help-devices">
+                    <h3>Устройства и их скорости</h3>
+                    <p>Вкладка <b>«Сеть»</b> показывает всех, кто получил адрес по DHCP: IP, MAC, имя и до какого времени аренда.</p>
+                    <p>Колонка <b>«Скорость (сейчас)»</b> — живой поток по каждому устройству (<span style="color:var(--good)">↓</span> скачивание, <span style="color:var(--accent)">↑</span> отдача). Сразу видно, кто грузит канал или у кого просадка.</p>
+                    <p class="small">Если у устройства <b>0</b> — оно просто сейчас ничего не передаёт (простой). Как пойдёт трафик — появятся реальные цифры.</p>
+                </div>
+
+                <div class="help-block" id="help-access">
+                    <h3>Доступ и фильтрация — кастомный межсетевой экран</h3>
+                    <p>Шлюз — это умный МЭ. По умолчанию открыт <b>весь</b> интернет; на вкладке
+                    <b>«Доступ»</b> вы точечно запрещаете ресурсы — всем или конкретным устройствам.
+                    Это <b>не</b> то же, что раздельное туннелирование (то — настройка VPN, на вкладке «VPN»).</p>
+                    <table class="help-table">
+                        <tr><td><b>Группа</b></td><td>Набор сайтов + блок-политика в одном. Создаёшь группу (имя/описание — по желанию, латиница или кириллица), добавляешь сайты по одному. Вписал <code>youtube.com</code> — весь набор доменов сервиса подтянулся сам, ничего разворачивать не надо.</td></tr>
+                        <tr><td><b>Кому блокировать</b></td><td>У каждой группы: <b>не блокировать</b> · <b>всем</b> · <b>только выбранным</b> (чёрный список устройств) · <b>всем кроме выбранных</b> (белый список — доступ лишь избранным).</td></tr>
+                        <tr><td><b>Устройства</b></td><td>Список собирается сам по всей сети — ты редактируешь. Закрепляешь постоянный IP по MAC (DHCP-резерв) и имя — правила по устройству стабильны.</td></tr>
+                    </table>
+                    <p class="small">Под капотом: домены группы резолвятся в IP (ipset, авто-рефреш), блокировка — это
+                    <code>iptables</code> с матчем по MAC устройства. Раздельное туннелирование и доступ — <b>разные сущности</b>:
+                    первое решает, идёт ли трафик через VPN, второе — пускать ли устройство к ресурсу.</p>
+                    <h3 style="margin-top:1rem"><span data-ic="warn"></span> Устройства за вложенным роутером</h3>
+                    <p>Правила по устройству работают, когда устройство — <b>в нашей сети</b> (подключено напрямую
+                    или через точку доступа в режиме <b>«мост / AP»</b>). Если снизу стоит обычный роутер в режиме
+                    <b>NAT/маршрутизатора</b>, шлюз видит только <b>один</b> его MAC — все за ним выглядят как одно
+                    устройство. Тогда правило применяется <b>ко всей подсети этого роутера целиком</b>. Для пер-устройство
+                    контроля доп. точки включайте в режим <b>«точка доступа / мост»</b>.</p>
+                    <p class="small">Весь набор правил можно выгрузить/загрузить одним JSON (кнопки внизу вкладки) —
+                    для переноса между шлюзами или бэкапа.</p>
+                </div>
+
+                <div class="help-block" id="help-console">
+                    <h3><span data-ic="code"></span>Встроенная консоль</h3>
+                    <p>Вкладка <b>«Консоль»</b> — полноценный терминал самого шлюза прямо в браузере
+                    (как обычная консоль, с приветствием и подсказками). Это удобный способ
+                    администрировать шлюз без отдельного SSH-клиента.</p>
+                    <ul>
+                        <li><b>Двойная авторизация:</b> сначала вход в саму панель, затем внутри консоли —
+                        повторно <b>те же учётные данные панели</b> (тот же логин/пароль, что и при входе в дашборд).</li>
+                        <li><b>Подсказки команд</b> справа — клик подставляет команду в консоль
+                        (<code>gateway-status</code>, <code>docker ps</code>, <code>awg show</code>, журнал, аренды, температура).</li>
+                        <li>Доступна из LAN и через VPN; защищена авторизацией панели.</li>
+                    </ul>
+                    <h3 style="margin-top:1rem"><span data-ic="user"></span>Учётные записи</h3>
+                    <p>Вкладка <b>«Система → Безопасность»</b> (для администратора):</p>
+                    <table class="help-table">
+                        <tr><td><b>Смена логина/пароля</b></td><td>Меняешь свой вход в панель (нужен текущий пароль).</td></tr>
+                        <tr><td><b>Создание учёток</b></td><td>Заводишь отдельные учётки — администраторы или пользователи (роль ограничивает доступ к управлению учётками).</td></tr>
+                        <tr><td><b>Сброс пароля / удаление</b></td><td>Восстановление доступа: админ сбрасывает пароль или удаляет учётку, подтверждая <b>своим</b> паролем.</td></tr>
+                    </table>
+                </div>
+
+                <div class="help-block" id="help-logs">
+                    <h3>Как читать журнал</h3>
+                    <table class="help-table">
+                        <tr><td><b style="color:var(--good)">OK</b></td><td>Успешное событие (VPN восстановлен, туннель поднят).</td></tr>
+                        <tr><td><b style="color:var(--warn)">WARN</b></td><td>Предупреждение (VPN недоступен, переключение на прямой).</td></tr>
+                        <tr><td><b style="color:var(--bad)">ERR</b></td><td>Ошибка (не удалось поднять туннель, упал сервис).</td></tr>
+                        <tr><td><b>INFO</b></td><td>Информация (ручные действия, старт сервисов).</td></tr>
+                    </table>
+                    <p class="small">Журнал ведётся в <code>/var/log/awg-watchdog.log</code>, обновляется автоматически. Время — местное: ставится по интернету (NTP), часовой пояс определяется автоматически.</p>
+                </div>
+
+                <div class="help-block" id="help-failover">
+                    <h3>Failover — защита от сбоев</h3>
+                    <p>Система самовосстанавливается на нескольких уровнях:</p>
+                    <ul>
+                        <li><b>При каждой загрузке</b> — переопределяет сеть, восстанавливает настройки (можно менять железо/порты).</li>
+                        <li><b>Docker restart</b> — упавший сервис (VPN, DHCP, панель) поднимается сам.</li>
+                        <li><b>Watchdog (5 мин)</b> — VPN упал → прямой интернет → попытка восстановить.</li>
+                        <li><b>Sysmon (1 мин)</b> — следит за сервисами, рестартит, чистит память.</li>
+                        <li><b>Еженедельно</b> — отчёт и авто-перезагрузка по воскресеньям.</li>
+                    </ul>
+                    <p class="small">Даже если VPN-сервер ляжет — ты не потеряешь интернет, трафик пойдёт напрямую и вернётся в туннель, когда сервер поднимется.</p>
+                </div>
+
+                <div class="help-block" id="help-install">
+                    <h3>Установка на диск</h3>
+                    <p>Образ записывается на USB через <b>Rufus</b> (режим DD Image) и грузится на целевом ПК.</p>
+                    <ol>
+                        <li>При первой загрузке с USB запускается текстовый установщик.</li>
+                        <li>Он находит внутренний диск и спрашивает подтверждение.</li>
+                        <li>Копирует систему и перезагружается — дальше всё работает из коробки.</li>
+                    </ol>
+                    <p class="small">Консольный дашборд на самом ПК: команда <code>gateway-status</code> или <code>watch -n3 gateway-status</code>.</p>
+                </div>
+
+                <div class="help-block" id="help-faq">
+                    <h3>Частые вопросы</h3>
+                    <p><b>Не открывается дашборд?</b> Проверь, что подключён к LAN-порту шлюза (или к роутеру за ним). Из интернета панель закрыта.</p>
+                    <p><b>VPN жёлтый (failover)?</b> Сервер недоступен — проверь endpoint, систему сама пробует переподключиться каждые 5 минут.</p>
+                    <p><b>Поменял сетевую карту?</b> Просто перезагрузи — порты определятся заново.</p>
+                    <p><b>У устройства скорость 0?</b> Значит оно сейчас ничего не качает (простой) — это норма. Появится трафик — пойдут реальные цифры.</p>
+                    <p><b>Время в журнале правильное?</b> Да — оно ставится по интернету (NTP), а часовой пояс определяется автоматически (по умолчанию Москва).</p>
+                    <p><b>Полная документация:</b> вкладка <b>«Документация»</b> (на устройстве) · <a href="https://github.com/AnDyQnn/OpenWRT_AWG" target="_blank">github.com/AnDyQnn/OpenWRT_AWG</a></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- О проекте -->
+        <div class="sys-panel" id="sys-about">
+            <div class="support-hero">
+                <div class="support-logo"><span data-ic="shield"></span></div>
+                <h2>Gateway Hub</h2>
+                <p class="support-tagline">Прозрачный VPN-шлюз на AmneziaWG · обход DPI · самовосстановление</p>
+                <div class="support-badges">
+                    <span class="badge">MIT License</span>
+                    <span class="badge">Open Source</span>
+                    <span class="badge">AmneziaWG 2.0</span>
+                    <span class="badge">powered by AnDy</span>
+                </div>
+            </div>
+
+            <div class="grid">
+                <div class="card">
+                    <h3><span data-ic="user"></span>Автор</h3>
+                    <div class="metric"><span>Роль</span><b>DevOps-разработчик</b></div>
+                    <div class="metric"><span>Подпись</span><b style="color:var(--accent)">powered by AnDy</b></div>
+                    <p class="small" style="margin-top:0.8rem">
+                        Проект создан и поддерживается одним человеком. Если он оказался полезен —
+                        звезда на GitHub лучшая благодарность <span data-ic="star"></span>
+                    </p>
+                </div>
+                <div class="card">
+                    <h3><span data-ic="github"></span>Исходный код</h3>
+                    <a class="contact-row" href="https://github.com/AnDyQnn/OpenWRT_AWG" target="_blank">
+                        <span class="contact-ico"><span data-ic="star"></span></span>
+                        <span><b>Репозиторий проекта</b><br><span class="small">github.com/AnDyQnn/OpenWRT_AWG</span></span>
+                    </a>
+                    <a class="contact-row" href="https://github.com/AnDyQnn/" target="_blank">
+                        <span class="contact-ico"><span data-ic="code"></span></span>
+                        <span><b>Профиль GitHub</b><br><span class="small">github.com/AnDyQnn</span></span>
+                    </a>
+                    <a class="contact-row" href="https://github.com/AnDyQnn/OpenWRT_AWG/issues" target="_blank">
+                        <span class="contact-ico"><span data-ic="bug"></span></span>
+                        <span><b>Сообщить о баге</b><br><span class="small">Issues на GitHub</span></span>
+                    </a>
+                    <p class="small" style="margin-top:0.8rem">
+                        Распространяется под <b>MIT</b> — свободно для личного и коммерческого использования.
+                        PR и предложения приветствуются.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ══ Документация ══ -->
+    <section id="tab-docs" class="tab">
+        <div class="doc-nav" id="doc-nav"></div>
+        <div class="card doc-content" id="doc-content"><div class="small">Загрузка документации…</div></div>
+    </section>
+</main>
+
+<!-- Уведомления (тосты) и модалка подтверждения — без браузерного UX -->
+<div id="toast-wrap" class="toast-wrap"></div>
+<div id="modal-back" class="modal-back" style="display:none">
+    <div class="modal">
+        <div id="modal-title" class="modal-title">Подтверждение</div>
+        <div id="modal-msg" class="modal-msg"></div>
+        <input id="modal-input" class="modal-input" style="display:none">
+        <div class="modal-btns">
+            <button id="modal-cancel" type="button">Отмена</button>
+            <button id="modal-ok" type="button" class="danger">Удалить</button>
+        </div>
+    </div>
+</div>
+
+<script src="/static/xterm.js"></script>
+<script src="/static/xterm-addon-fit.js"></script>
+<script src="/static/fx.js"></script>
+<script>
+    GWFX.background(document.getElementById('fx-bg'), 'mid');
+    GWFX.runShield(document.getElementById('topbar-shield'));
+    GWFX.favicon();
+    GWFX.icons(document);
+    // под-навигация вкладки «Система»
+    document.querySelectorAll('.subnav-link[data-sys]').forEach(a => {
+        a.addEventListener('click', e => {
+            e.preventDefault();
+            document.querySelectorAll('.subnav-link').forEach(x => x.classList.remove('active'));
+            document.querySelectorAll('.sys-panel').forEach(x => x.classList.remove('active'));
+            a.classList.add('active');
+            document.getElementById('sys-' + a.dataset.sys).classList.add('active');
+        });
+    });
+</script>
+<script src="/static/app.js"></script>
+</body>
+</html>

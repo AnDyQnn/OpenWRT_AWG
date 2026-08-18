@@ -1,0 +1,69 @@
+version: "3.9"
+
+# Топология:
+#   internet (NAT via Docker) ← WAN network ← gateway ← LAN network ← consumer
+#
+#   gateway:  eth0=WAN (gets IP from Docker), eth1=LAN (192.168.88.1, DHCP сервер)
+#   consumer: eth0=LAN (получает IP от gateway через DHCP)
+
+networks:
+  wan:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.99.0.0/24
+  lan:
+    driver: bridge
+    ipam:
+      driver: null   # отключаем Docker DHCP — наш dnsmasq сам раздаёт адреса
+    internal: false
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: gateway-linux:test
+    container_name: gw-gateway
+    hostname: gateway
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+    privileged: true
+    networks:
+      wan:
+        ipv4_address: 10.99.0.10
+      lan:
+        ipv4_address: 192.168.88.1
+    environment:
+      - WAN_IFACE=eth0
+      - LAN_IFACE=eth1
+    command: /usr/local/bin/run-test.sh
+    ports:
+      - "8880:80"    # веб-панель доступна на localhost:8880
+
+  consumer:
+    image: alpine:latest
+    container_name: gw-consumer
+    hostname: consumer
+    cap_add:
+      - NET_ADMIN
+    networks:
+      lan: {}
+    depends_on:
+      - gateway
+    command: >
+      sh -c "
+        echo 'Waiting for DHCP from gateway...'
+        udhcpc -i eth0 -t 10 -T 3 -n
+        echo 'Got IP:'
+        ip addr show eth0
+        echo 'Gateway ping:'
+        ping -c 3 192.168.88.1
+        echo 'Internet ping:'
+        ping -c 3 8.8.8.8
+        echo 'Web UI check:'
+        wget -qO- http://192.168.88.1/awg/ | head -5
+        echo 'ALL TESTS DONE'
+        sleep 3600
+      "

@@ -1,0 +1,198 @@
+name: build-test-publish
+
+# Пайплайн автообновления (§4 docs/auto-update.md):
+#   build 3 образов → test (поднять стек, прогнать проверки) → publish:
+#   push образов в GHCR по digest + сборка manifest.json + коммит кода/VERSION/
+#   manifest в ветку-канал upd-code, откуда железо тянет обновление.
+#
+# ТРЕБУЕТСЯ от владельца репозитория (один раз):
+#   1. Settings → Actions → General → Workflow permissions = "Read and write".
+#   2. Settings → Secrets → Actions → новый секрет TEST_AWG_CONF = содержимое
+#      рабочего тестового awg0.conf (endpoint живого тест-сервера). Без него
+#      job test пропустит проверку туннеля (build/publish всё равно отработают).
+#   3. Первый успешный прогон создаст GHCR-пакеты — сделать их public
+#      (Packages → каждый пакет → Package settings → Change visibility → Public),
+#      иначе железу нужен токен на pull.
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'linux-gw/gateway/**'
+      - 'linux-gw/rootfs-overlay/**'
+      - '.github/workflows/build-and-release.yml'
+  workflow_dispatch: {}
+
+env:
+  REGISTRY: ghcr.io
+  # NS вычисляется в шаге «Подготовка» как ghcr.io/<owner-lowercase>/openwrt-awg/<svc>
+  # (GHCR требует имя репозитория в нижнем регистре; github.repository_owner может
+  #  содержать заглавные буквы — напр. AnDyQnn).
+  CHANNEL: upd-code
+
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write          # коммит в ветку upd-code
+      packages: write          # push в GHCR
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Подготовка (namespace в нижнем регистре + версия)
+        id: ver
+        run: |
+          echo "NS=$(echo '${{ github.repository_owner }}/openwrt-awg' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+          echo "version=$(tr -d ' \t\r\n' < linux-gw/gateway/VERSION)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── BUILD + PUSH (по digest) каждого сервиса ──
+      - name: Build & push awg
+        id: awg
+        uses: docker/build-push-action@v6
+        with:
+          context: linux-gw/gateway/awg
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.NS }}/awg:v${{ steps.ver.outputs.version }}
+          cache-from: type=gha,scope=awg
+          cache-to: type=gha,scope=awg,mode=max
+
+      - name: Build & push dnsmasq
+        id: dnsmasq
+        uses: docker/build-push-action@v6
+        with:
+          context: linux-gw/gateway/dnsmasq
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.NS }}/dnsmasq:v${{ steps.ver.outputs.version }}
+          cache-from: type=gha,scope=dnsmasq
+          cache-to: type=gha,scope=dnsmasq,mode=max
+
+      - name: Build & push webui
+        id: webui
+        uses: docker/build-push-action@v6
+        with:
+          context: linux-gw/gateway/webui
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.NS }}/webui:v${{ steps.ver.outputs.version }}
+          cache-from: type=gha,scope=webui
+          cache-to: type=gha,scope=webui,mode=max
+
+      # ── TEST: поднять стек и прогнать базовые проверки ──
+      - name: Smoke-test стека
+        env:
+          TEST_AWG_CONF: ${{ secrets.TEST_AWG_CONF }}
+          AWG_DIGEST: ${{ steps.awg.outputs.digest }}
+          DNSMASQ_DIGEST: ${{ steps.dnsmasq.outputs.digest }}
+          WEBUI_DIGEST: ${{ steps.webui.outputs.digest }}
+        run: |
+          set -e
+          # Ретегаем только что собранные образы в имена, которые ждёт compose.
+          docker pull "$REGISTRY/$NS/awg@$AWG_DIGEST"
+          docker tag  "$REGISTRY/$NS/awg@$AWG_DIGEST" gateway-awg:latest
+          docker pull "$REGISTRY/$NS/dnsmasq@$DNSMASQ_DIGEST"
+          docker tag  "$REGISTRY/$NS/dnsmasq@$DNSMASQ_DIGEST" gateway-dnsmasq:latest
+          docker pull "$REGISTRY/$NS/webui@$WEBUI_DIGEST"
+          docker tag  "$REGISTRY/$NS/webui@$WEBUI_DIGEST" gateway-webui:latest
+
+          sudo modprobe tun || true
+          # минимальное состояние для старта
+          sudo mkdir -p /etc/awg-setup/filter /etc/amnezia /var/lib/misc
+          echo '{}' | sudo tee /etc/awg-setup/filter/rules.json >/dev/null
+          echo vpn | sudo tee /etc/awg-setup/user-mode >/dev/null
+          if [ -n "$TEST_AWG_CONF" ]; then
+            printf '%s' "$TEST_AWG_CONF" | sudo tee /etc/amnezia/awg0.conf >/dev/null
+            sudo chmod 600 /etc/amnezia/awg0.conf
+          fi
+
+          cd linux-gw/gateway
+          docker compose up -d
+          sleep 20
+
+          echo "=== контейнеры ==="
+          for c in gw-awg gw-dnsmasq gw-webui; do
+            st=$(docker inspect -f '{{.State.Running}}' "$c" 2>/dev/null || echo missing)
+            echo "$c: $st"
+            [ "$st" = "true" ] || { docker logs "$c" 2>&1 | tail -30; exit 1; }
+          done
+
+          echo "=== панель отвечает ==="
+          for i in $(seq 1 15); do
+            code=$(curl -sk -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/login || true)
+            [ "$code" = "200" ] && { echo "panel: 200"; break; }
+            sleep 3
+            [ "$i" = 15 ] && { echo "панель не ответила"; docker logs gw-webui 2>&1 | tail -30; exit 1; }
+          done
+
+          if [ -n "$TEST_AWG_CONF" ]; then
+            echo "=== туннель (handshake) ==="
+            docker exec gw-awg awg-up /etc/amnezia/awg0.conf || true
+            ok=0
+            for i in $(seq 1 20); do
+              hs=$(docker exec gw-awg awg show awg0 latest-handshakes 2>/dev/null | awk '{print $2; exit}')
+              if [ -n "$hs" ] && [ "$hs" -gt 0 ] 2>/dev/null; then echo "handshake ok"; ok=1; break; fi
+              sleep 3
+            done
+            [ "$ok" = "1" ] || { echo "WARN: туннель не встал (проверь TEST_AWG_CONF/endpoint)"; }
+          else
+            echo "TEST_AWG_CONF не задан — проверка туннеля пропущена"
+          fi
+          docker compose down || true
+
+      # ── PUBLISH: manifest.json + код в ветку upd-code ──
+      - name: Сборка manifest.json
+        env:
+          AWG_DIGEST: ${{ steps.awg.outputs.digest }}
+          DNSMASQ_DIGEST: ${{ steps.dnsmasq.outputs.digest }}
+          WEBUI_DIGEST: ${{ steps.webui.outputs.digest }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -e
+          ns_lc=$(echo "$NS" | tr '[:upper:]' '[:lower:]')
+          changelog=$(git log -1 --pretty=%s)
+          cat > /tmp/manifest.json <<EOF
+          {
+            "version": "$VERSION",
+            "channel": "$CHANNEL",
+            "released": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "images": {
+              "gateway-awg":     "$REGISTRY/$ns_lc/awg@$AWG_DIGEST",
+              "gateway-dnsmasq": "$REGISTRY/$ns_lc/dnsmasq@$DNSMASQ_DIGEST",
+              "gateway-webui":   "$REGISTRY/$ns_lc/webui@$WEBUI_DIGEST"
+            },
+            "min_from_version": "2.0.0",
+            "changelog": "$changelog"
+          }
+          EOF
+          cat /tmp/manifest.json
+
+      - name: Публикация в ветку upd-code
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -e
+          # Готовим содержимое канала: только то, что нужно железу для in-place.
+          work=$(mktemp -d)
+          cp -a linux-gw/gateway "$work/gateway"
+          cp -a linux-gw/rootfs-overlay "$work/rootfs-overlay"
+          cp linux-gw/gateway/VERSION "$work/VERSION"
+          cp /tmp/manifest.json "$work/manifest.json"
+
+          cd "$work"
+          git init -q
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -q -b "$CHANNEL"
+          git add -A
+          git commit -q -m "channel $CHANNEL: v$VERSION ($(date -u +%F))"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "$CHANNEL"
+          echo "Опубликовано v$VERSION в ветку $CHANNEL"
