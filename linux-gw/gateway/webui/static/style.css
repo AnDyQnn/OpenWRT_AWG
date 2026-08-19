@@ -342,6 +342,25 @@ button .ico, .btn .ico { margin-right: 0.32em; vertical-align: -0.15em; }
 @keyframes toastin { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 .toast { pointer-events: auto; }
 
+/* ── Напоминание о доступном обновлении ──
+   Всплывает само, само уходит и возвращается позже. Задача — попасться на глаза,
+   не перекрывая интерфейс: обычный тост в углу, кликабельный, с мягкой пульсацией
+   в первые секунды. Никаких модалок и блокировок — работать не мешает. */
+.toast.nag { cursor: pointer; border-left-color: var(--accent);
+    animation: toastin .2s ease, nagpulse 1.5s ease-in-out 3; }
+.toast.nag:hover { border-color: var(--accent); transform: translateX(-2px);
+    transition: transform .15s ease, border-color .15s ease; }
+.toast.nag .nag-hint { display: block; margin-top: 0.25rem;
+    font-size: 0.78rem; color: var(--muted); }
+@keyframes nagpulse {
+    0%, 100% { box-shadow: 0 6px 22px rgba(0,0,0,.45); }
+    50%      { box-shadow: 0 6px 22px rgba(0,0,0,.45), 0 0 0 3px rgba(88,166,255,.25); }
+}
+/* Уважаем системную настройку «меньше движения» */
+@media (prefers-reduced-motion: reduce) {
+    .toast.nag { animation: toastin .2s ease; }
+}
+
 /* ── Сегменты сети: блок с подписанными полями ── */
 .seg-row { border: 1px solid var(--line, #2a3550); border-radius: 10px; padding: .75rem .85rem; margin-bottom: .7rem; background: rgba(255,255,255,.015); }
 .seg-row-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: .6rem; }

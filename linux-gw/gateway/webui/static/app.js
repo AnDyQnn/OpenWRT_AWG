@@ -34,10 +34,22 @@ async function api(path, opts) {
 }
 
 // ── Уведомления (тосты) вместо браузерных alert ──
-function toast(msg, type = 'info', ms = 3800) {
+// opts.onClick — делает тост кликабельным (клик закрывает его и вызывает колбэк).
+// opts.hint    — вторая строка помельче, для подсказки «нажмите, чтобы…».
+function toast(msg, type = 'info', ms = 3800, opts = null) {
     const w = document.getElementById('toast-wrap'); if (!w) return;
     const t = document.createElement('div');
-    t.className = 'toast ' + type; t.textContent = msg;
+    t.className = 'toast ' + type;
+    t.textContent = msg;
+    if (opts && opts.hint) {
+        const h = document.createElement('span');
+        h.className = 'nag-hint'; h.textContent = opts.hint;
+        t.appendChild(h);
+    }
+    if (opts && typeof opts.onClick === 'function') {
+        t.classList.add('nag');
+        t.addEventListener('click', () => { t.remove(); opts.onClick(); });
+    }
     w.appendChild(t);
     setTimeout(() => { t.classList.add('fade'); setTimeout(() => t.remove(), 400); }, ms);
 }
@@ -1307,6 +1319,56 @@ setInterval(refresh, 5000);
 setInterval(loadLogs, 15000);
 setInterval(loadReport, 300000);
 setInterval(loadSecurityStats, 6000);
+
+// ── Напоминание о доступном обновлении ───────────────────────────────────────
+// Задача: попасться на глаза, но не мешать. Поэтому обычный тост в углу — само
+// всплывает, само уходит, и возвращается позже, пока обновление не поставят.
+// Никаких модалок, баннеров и блокировок ввода.
+//
+// Молчим, когда напоминать незачем или это будет раздражать без пользы:
+//   * обновления нет;
+//   * накат уже идёт (там свой прогресс);
+//   * пользователь и так смотрит на раздел «Обновление»;
+//   * вкладка браузера в фоне (иначе к возвращению накопится очередь тостов);
+//   * не админ — раздел ему не доступен, звать некуда (API вернёт 403).
+const _NAG_CHECK_MS  = 5 * 60 * 1000;   // как часто спрашивать состояние
+const _NAG_REPEAT_MS = 7 * 60 * 1000;   // не показывать чаще, чем раз в
+const _NAG_SHOW_MS   = 9000;            // сколько висит на экране
+let _nagLastShown = 0;
+
+function _updSectionVisible() {
+    const tab = document.querySelector('.topbar nav a[data-tab="system"]');
+    const pan = document.getElementById('sys-update');
+    return !!(tab && tab.classList.contains('active') &&
+              pan && pan.classList.contains('active'));
+}
+function _openUpdateSection() {
+    const tab = document.querySelector('.topbar nav a[data-tab="system"]');
+    if (tab) tab.click();
+    const sub = document.querySelector('.subnav-link[data-sys="update"]');
+    if (sub) sub.click();
+    loadUpdate();
+}
+async function nagUpdate() {
+    if (document.hidden) return;
+    if (_updSectionVisible()) return;
+    if (Date.now() - _nagLastShown < _NAG_REPEAT_MS) return;
+
+    let d = null;
+    try { d = await api('/api/update/status'); } catch (e) { return; }
+    if (!d || d.error) return;                      // не админ или бэкенд недоступен
+    if (d.update_inprogress) return;                // накат идёт — есть свой прогресс
+    const st = d.status || {};
+    if (st.state !== 'available') return;           // нечего предлагать
+
+    _nagLastShown = Date.now();
+    toast(`Доступно обновление ${st.to || ''}`.trim(), 'warn', _NAG_SHOW_MS, {
+        hint: 'Нажмите, чтобы открыть раздел обновления',
+        onClick: _openUpdateSection,
+    });
+}
+setTimeout(nagUpdate, 20000);           // первый раз — дав панели прогрузиться
+setInterval(nagUpdate, _NAG_CHECK_MS);
 
 // ── Кастомные подсказки для «?» (.seg-q): нативный title не всплывал; свой тултип
 //    крепим к body (не режется overflow карточек) и стилизуем под панель. ──
