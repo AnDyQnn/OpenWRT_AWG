@@ -77,8 +77,11 @@ jobs:
             echo "--- ghcr.io/$NS/$s:v$V"
             docker pull -q "ghcr.io/$NS/$s:v$V"
             docker tag  "ghcr.io/$NS/$s:v$V" "gateway-$s:latest"
+            # проверяем тег явно: grep в конвейере при set -e роняет шаг, если
+            # ничего не нашёл, а docker image inspect честно падает только когда
+            # тега действительно нет
+            docker image inspect "gateway-$s:latest"               --format "    gateway-$s:latest  {{.Size}} байт"
           done
-          docker images --format '  {{.Repository}}:{{.Tag}} {{.Size}}' | grep '^  gateway-'
 
       - name: Запечь образы в images.tar
         run: |
@@ -107,7 +110,9 @@ jobs:
           [ "$got" = "$V" ] || { echo "версия в образе $got, а ожидали $V"; exit 1; }
           docker run --rm --entrypoint sh gateway-linux:latest -c '
             set -e
-            grep -q "^Port" /etc/ssh/sshd_config.d/10-gateway.conf && { echo "порт SSH захардкожен"; exit 1; }
+            if grep -q "^Port" /etc/ssh/sshd_config.d/10-gateway.conf; then
+              echo "порт SSH захардкожен в репозитории"; exit 1
+            fi
             [ -x /usr/local/bin/gateway-ssh-port.sh ] || { echo "нет помощника порта"; exit 1; }
             [ -s /opt/gateway/host-requirements.list ] || { echo "нет списка требований"; exit 1; }
             echo "  версия, порт, помощник и требования — на месте"
