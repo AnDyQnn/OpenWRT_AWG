@@ -55,9 +55,9 @@
 | **VPN** | AmneziaWG (amneziawg‑go, компиляция из исходников) |
 | **Сервисы** | Docker: `gw-awg`, `gw-dnsmasq`, `gw-webui` |
 | **Управление** | веб‑панель HTTPS + консольный `gateway-status` |
-| **Размер образа** | ~875 МБ (`.img.gz`) |
+| **Размер образа** | ~820 МБ (`.img.gz`) |
 | **Лицензия** | MIT |
 
-Корневой [README](../README.md) — про сам образ и быстрый старт.
+Корневой [README](https://github.com/AnDyQnn/OpenWRT_AWG/blob/main/README.md) — про сам образ и быстрый старт.
 
 *powered by AnDy*

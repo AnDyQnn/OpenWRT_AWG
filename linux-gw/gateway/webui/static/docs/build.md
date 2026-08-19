@@ -13,9 +13,9 @@
 
 | Что | Где |
 |-----|-----|
-| Файл | `gateway.img.gz` (~875 МБ) |
+| Файл | `gateway.img.gz` (~820 МБ) |
 | Релизы | https://github.com/AnDyQnn/OpenWRT_AWG/releases |
-| Последний | тег вида `linux-gw-vX.Y` |
+| Последний | тег вида `linux-gw-vX.Y.Z` |
 
 Распаковывать `.gz` **не нужно** — Rufus разожмёт сам при записи (см. [Установка](install.md)).
 
@@ -89,7 +89,7 @@ linux-gw/
 ## Проверка собранного образа (без записи на флешку)
 
 В `linux-gw/test/` есть скрипты запуска в VirtualBox — см.
-[README‑vbox‑test](../linux-gw/test/README-vbox-test.md). Коротко:
+[README‑vbox‑test](https://github.com/AnDyQnn/OpenWRT_AWG/blob/main/linux-gw/test/README-vbox-test.md). Коротко:
 
 ```powershell
 # 1. подготовить образ (serial-лог, отключить инсталлер)

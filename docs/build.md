@@ -13,9 +13,9 @@
 
 | Что | Где |
 |-----|-----|
-| Файл | `gateway.img.gz` (~875 МБ) |
+| Файл | `gateway.img.gz` (~820 МБ) |
 | Релизы | https://github.com/AnDyQnn/OpenWRT_AWG/releases |
-| Последний | тег вида `linux-gw-vX.Y` |
+| Последний | тег вида `linux-gw-vX.Y.Z` |
 
 Распаковывать `.gz` **не нужно** — Rufus разожмёт сам при записи (см. [Установка](install.md)).
 
