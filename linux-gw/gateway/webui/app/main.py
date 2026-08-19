@@ -30,6 +30,7 @@ import os
 import pty
 import re
 import secrets
+import shlex
 import shutil
 import socket
 import struct
@@ -1312,6 +1313,30 @@ def _host_prefix() -> list[str]:
     return []
 
 
+def _host_detached(argv: list[str]) -> list[str]:
+    """Запуск ДОЛГОЙ команды на хосте так, чтобы она пережила пересоздание
+    контейнера панели.
+
+    Зачем: накат в середине делает `docker compose up -d`, который пересоздаёт
+    сам gw-webui. Обычный Popen оставляет процесс в cgroup контейнера, поэтому
+    он умирает вместе с ним — обновление обрывается между установкой и
+    health-gate, а старый контейнер остаётся переименованным (0991…_gw-webui),
+    и панель «пропадает» из-под своего имени. Ровно так и случилось на живом
+    шлюзе при нажатии кнопки «Обновить сейчас».
+
+    systemd-run поднимает команду отдельным transient-юнитом хоста: свой cgroup,
+    своя сессия — остановка контейнера её не касается. Проверку наличия делаем
+    НА ХОСТЕ (внутри контейнера systemd-run нет), с запасным вариантом setsid.
+    """
+    q = " ".join(shlex.quote(a) for a in argv)
+    script = (
+        "if command -v systemd-run >/dev/null 2>&1; then "
+        f"exec systemd-run --collect --quiet --unit=gw-panel-$$ -- {q}; "
+        f"else exec setsid {q}; fi"
+    )
+    return _host_prefix() + ["sh", "-c", script]
+
+
 def _safe_backup_name(name: str) -> str:
     name = (name or "").strip().strip("/")
     return "" if (not name or "/" in name or ".." in name) else name
@@ -1436,7 +1461,7 @@ def system_restart_services(request: Request):
         return JSONResponse({"error": "Доступно только администратору"}, status_code=403)
     _wlog(f"WARN Перезапуск сервисов через панель (user={_token_user(request)})")
     try:
-        subprocess.Popen(_host_prefix() + ["sh", "-c", "cd /opt/gateway && docker compose restart"],
+        subprocess.Popen(_host_detached(["sh", "-c", "cd /opt/gateway && docker compose restart"]),
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
@@ -1519,7 +1544,7 @@ def update_check(request: Request):
     if not _is_admin(request):
         return JSONResponse({"error": "Доступно только администратору"}, status_code=403)
     try:
-        subprocess.Popen(_host_prefix() + ["gateway-update.sh", "check"],
+        subprocess.Popen(_host_detached(["gateway-update.sh", "check"]),
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
@@ -1534,7 +1559,7 @@ def update_apply(req: SystemActionReq, request: Request):
         return JSONResponse({"ok": False, "error": "Нужно подтверждение обновления"}, status_code=400)
     _wlog(f"WARN Запуск обновления через панель (user={_token_user(request)})")
     try:
-        subprocess.Popen(_host_prefix() + ["gateway-update.sh", "apply"],
+        subprocess.Popen(_host_detached(["gateway-update.sh", "apply"]),
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
@@ -1549,7 +1574,7 @@ def update_rollback(req: SystemActionReq, request: Request):
         return JSONResponse({"ok": False, "error": "Нужно подтверждение отката"}, status_code=400)
     _wlog(f"WARN Ручной откат обновления через панель (user={_token_user(request)})")
     try:
-        subprocess.Popen(_host_prefix() + ["gateway-update.sh", "rollback"],
+        subprocess.Popen(_host_detached(["gateway-update.sh", "rollback"]),
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
