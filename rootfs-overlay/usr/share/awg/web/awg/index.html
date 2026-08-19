@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AmneziaWG Gateway</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#cdd9e5;font:13px/1.5 monospace;padding:16px;min-height:100vh}
+h1{font-size:15px;color:#58a6ff;margin-bottom:14px;letter-spacing:1px}
+h1 span{color:#3d444d;font-size:11px;margin-left:8px}
+
+.card{background:#161b22;border:1px solid #30363d;border-radius:6px;padding:14px;margin-bottom:10px}
+.card-title{font-size:10px;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.badge{font-size:10px;padding:1px 6px;border-radius:10px;font-weight:normal;text-transform:none;letter-spacing:0}
+.badge.ok{background:#1a3a1a;color:#3fb950;border:1px solid #3fb95040}
+.badge.warn{background:#2d2208;color:#d29922;border:1px solid #d2992240}
+.badge.err{background:#2d1e1e;color:#f85149;border:1px solid #f8514940}
+.badge.info{background:#1a2a3a;color:#58a6ff;border:1px solid #58a6ff40}
+.badge.off{background:#1c1f24;color:#8b949e;border:1px solid #30363d}
+
+.status-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.dot.ok{background:#3fb950;box-shadow:0 0 5px #3fb95080}
+.dot.warn{background:#d29922;box-shadow:0 0 5px #d2992280}
+.dot.err{background:#f85149;box-shadow:0 0 5px #f8514980}
+.dot.off{background:#3d444d}
+
+#status-text{font-size:14px;font-weight:bold}
+
+.meta{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:12px}
+.meta .k{color:#8b949e;white-space:nowrap}
+.meta .v{color:#cdd9e5;word-break:break-all}
+
+.alert{padding:7px 11px;border-radius:4px;font-size:12px;margin-bottom:10px;display:none;align-items:center;gap:8px}
+.alert.show{display:flex}
+.alert.warn{background:#2d2208;border:1px solid #d29922;color:#d29922}
+.alert.err{background:#2d1e1e;border:1px solid #f85149;color:#f85149}
+.alert.info{background:#0d2137;border:1px solid #58a6ff;color:#58a6ff}
+.alert span{flex:1}
+
+.stats{display:flex;gap:14px;margin-top:10px;font-size:12px}
+.stat{color:#8b949e}.stat span{color:#cdd9e5}
+
+.btns{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+button{background:#21262d;border:1px solid #30363d;color:#cdd9e5;padding:5px 12px;
+    border-radius:4px;cursor:pointer;font:12px monospace;transition:background .15s}
+button:hover{background:#30363d}
+button.primary{background:#1f6feb;border-color:#1f6feb;color:#fff}
+button.primary:hover{background:#388bfd}
+button.danger{border-color:#f85149;color:#f85149}
+button.danger:hover{background:#2d1e1e}
+button.success{border-color:#3fb950;color:#3fb950}
+button.success:hover{background:#1a3a1a}
+button.small{padding:2px 8px;font-size:11px}
+button:disabled{opacity:.4;cursor:not-allowed}
+
+/* Системный мониторинг */
+.sysmon{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px}
+.sysmon-row{display:flex;align-items:center;gap:8px}
+.sysmon-label{color:#8b949e;width:48px;flex-shrink:0}
+.bar-wrap{flex:1;background:#21262d;border-radius:3px;height:8px;overflow:hidden}
+.bar{height:100%;border-radius:3px;transition:width .5s}
+.bar.cpu{background:#58a6ff}
+.bar.mem{background:#3fb950}
+.bar.warn{background:#d29922}
+.bar.err{background:#f85149}
+.sysmon-val{color:#cdd9e5;width:70px;text-align:right;font-size:11px}
+
+/* VPN режим */
+.mode-row{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:12px}
+.mode-label{color:#8b949e}
+.mode-val{font-weight:bold}
+.mode-val.vpn{color:#3fb950}
+.mode-val.fallback{color:#d29922}
+.mode-val.off{color:#8b949e}
+.mode-val.none{color:#3d444d}
+
+/* Дроп-зона */
+.drop{border:2px dashed #30363d;border-radius:6px;padding:24px;text-align:center;
+    cursor:pointer;transition:border-color .15s;color:#8b949e;font-size:12px;margin-bottom:8px}
+.drop:hover,.drop.over{border-color:#58a6ff;color:#58a6ff}
+.drop input{display:none}
+.drop.has-file{border-color:#3fb950;color:#3fb950}
+#file-name{font-size:11px;margin-top:5px;color:#8b949e}
+
+/* Конфиг-карточка */
+#conf-card{display:none}
+.obf-row{margin-top:7px;padding-top:7px;border-top:1px solid #21262d;
+    font-size:11px;color:#8b949e;display:flex;flex-wrap:wrap;gap:8px}
+.obf-row span{color:#cdd9e5}
+
+/* Логи */
+.log-box{font-size:11px;max-height:160px;overflow-y:auto;color:#8b949e}
+.log-line{padding:2px 0;border-bottom:1px solid #161b22;display:flex;gap:6px}
+.log-line .lts{color:#3d444d;flex-shrink:0;font-size:10px}
+.log-line.ok  .lmsg{color:#3fb950}
+.log-line.warn .lmsg{color:#d29922}
+.log-line.err  .lmsg{color:#f85149}
+.log-line.info .lmsg{color:#8b949e}
+
+/* Еженедельный отчёт */
+#weekly-card{display:none}
+.weekly-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;font-size:12px}
+.weekly-item{background:#0d1117;border-radius:4px;padding:8px;text-align:center}
+.weekly-item .wv{font-size:18px;font-weight:bold;color:#58a6ff;margin-bottom:2px}
+.weekly-item .wl{font-size:10px;color:#8b949e}
+
+/* Установка на диск */
+.disk-list{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.disk-item{display:flex;align-items:center;gap:10px;padding:7px 10px;
+    border:1px solid #30363d;border-radius:4px;cursor:pointer;font-size:12px;transition:border-color .15s}
+.disk-item:hover:not(.disabled){border-color:#58a6ff}
+.disk-item.selected{border-color:#3fb950;background:#1a3a1a}
+.disk-item.disabled{opacity:.4;cursor:not-allowed}
+.disk-item input{display:none}
+.disk-dev{color:#58a6ff;width:80px;flex-shrink:0}
+.disk-info{flex:1;color:#8b949e}
+.disk-size{color:#cdd9e5;font-weight:bold}
+.disk-boot-badge{font-size:10px;padding:1px 6px;border-radius:3px;background:#2d2208;color:#d29922;border:1px solid #d2992240}
+#disk-progress{display:none;font-size:12px;color:#8b949e;margin-top:8px}
+</style>
+</head>
+<body>
+<h1>AmneziaWG <span>gateway</span></h1>
+
+<div id="setup-alert" class="alert">
+  <span id="setup-alert-msg"></span>
+  <button class="small" id="btn-retry" onclick="retrySetup()" style="display:none">↺ Настройка</button>
+</div>
+
+<!-- Системный монитор -->
+<div class="card" id="sys-card" style="display:none">
+  <div class="card-title">Система</div>
+  <div class="sysmon" id="sysmon">
+    <div class="sysmon-row">
+      <span class="sysmon-label">CPU</span>
+      <div class="bar-wrap"><div class="bar cpu" id="bar-cpu" style="width:0%"></div></div>
+      <span class="sysmon-val" id="val-cpu">—</span>
+    </div>
+    <div class="sysmon-row">
+      <span class="sysmon-label">MEM</span>
+      <div class="bar-wrap"><div class="bar mem" id="bar-mem" style="width:0%"></div></div>
+      <span class="sysmon-val" id="val-mem">—</span>
+    </div>
+    <div class="sysmon-row">
+      <span class="sysmon-label">Uptime</span>
+      <div class="bar-wrap" style="background:none"></div>
+      <span class="sysmon-val" id="val-up" style="width:auto;flex:1">—</span>
+    </div>
+    <div class="sysmon-row">
+      <span class="sysmon-label">Устройств</span>
+      <div class="bar-wrap" style="background:none"></div>
+      <span class="sysmon-val" id="val-dev" style="width:auto;flex:1">—</span>
+    </div>
+  </div>
+  <div class="stats" id="net-stats" style="margin-top:8px">
+    <div class="stat">WAN ↓ <span id="s-rx">—</span></div>
+    <div class="stat">WAN ↑ <span id="s-tx">—</span></div>
+    <div class="stat">Load <span id="s-load">—</span></div>
+    <div class="stat" id="s-wan-wrap" style="display:none">Port <span id="s-wan">—</span></div>
+  </div>
+</div>
+
+<!-- Установка на диск -->
+<div class="card" id="disk-card">
+  <div class="card-title">
+    Установить на диск
+    <button class="small" onclick="loadDisks()" style="margin-left:auto">↺</button>
+  </div>
+  <div class="disk-list" id="disk-list"><div style="color:#8b949e;font-size:12px">Загрузка...</div></div>
+  <div class="btns">
+    <button class="primary" id="btn-install-disk" onclick="installToDisk()" disabled>▼ Установить</button>
+  </div>
+  <div id="disk-progress"></div>
+</div>
+
+<!-- Статус туннеля -->
+<div class="card">
+  <div class="card-title">Туннель AmneziaWG</div>
+
+  <!-- VPN режим -->
+  <div class="mode-row">
+    <span class="mode-label">Режим:</span>
+    <span class="mode-val" id="mode-text">—</span>
+    <button class="small success" id="btn-vpn-on"  onclick="setVpnMode(true)"  style="display:none">▲ Включить VPN</button>
+    <button class="small danger"  id="btn-vpn-off" onclick="setVpnMode(false)" style="display:none">▼ Выключить VPN</button>
+  </div>
+
+  <div class="status-row">
+    <div class="dot off" id="dot"></div>
+    <span id="status-text">Проверяем...</span>
+  </div>
+  <div class="meta" id="meta" style="display:none">
+    <span class="k">Tunnel IP</span>  <span class="v" id="m-ip">—</span>
+    <span class="k">Endpoint</span>   <span class="v" id="m-ep">—</span>
+    <span class="k">Handshake</span>  <span class="v" id="m-hs">—</span>
+  </div>
+  <div class="stats" id="stats" style="display:none">
+    <div class="stat">↓ <span id="m-rx">—</span></div>
+    <div class="stat">↑ <span id="m-tx">—</span></div>
+  </div>
+  <div class="btns">
+    <button id="btn-up"      onclick="ctrl('up')">▲ Подключить</button>
+    <button id="btn-down"    onclick="ctrl('down')">▼ Отключить</button>
+    <button id="btn-restart" onclick="ctrl('restart')">↺ Перезапустить</button>
+  </div>
+</div>
+
+<!-- Загрузка конфига -->
+<div class="card">
+  <div class="card-title">Загрузить конфиг (.conf)</div>
+  <div class="drop" id="drop" onclick="document.getElementById('fi').click()">
+    <div>Перетащи файл <b>.conf</b> сюда или нажми для выбора</div>
+    <div id="file-name">файл не выбран</div>
+    <input type="file" id="fi" accept=".conf,text/plain" onchange="onFile(this.files[0])">
+  </div>
+  <div class="btns">
+    <button class="primary" id="btn-apply" onclick="applyConfig()" disabled>Применить конфиг</button>
+  </div>
+</div>
+
+<!-- Параметры применённого конфига -->
+<div class="card" id="conf-card">
+  <div class="card-title">
+    Применённый конфиг
+    <span class="badge ok" id="conf-proto-badge"></span>
+  </div>
+  <div class="meta" id="conf-meta">
+    <span class="k">Tunnel IP</span>   <span class="v" id="c-addr">—</span>
+    <span class="k">DNS</span>          <span class="v" id="c-dns">—</span>
+    <span class="k">Endpoint</span>    <span class="v" id="c-ep">—</span>
+    <span class="k">AllowedIPs</span>  <span class="v" id="c-aips">—</span>
+    <span class="k">MTU</span>          <span class="v" id="c-mtu">—</span>
+    <span class="k">Keepalive</span>   <span class="v" id="c-ka">—</span>
+  </div>
+  <div class="obf-row" id="c-obf" style="display:none">
+    Обфускация:
+    <span>Jc=<span id="c-jc">—</span></span>
+    <span>Jmin=<span id="c-jmin">—</span></span>
+    <span>Jmax=<span id="c-jmax">—</span></span>
+    <span>S1=<span id="c-s1">—</span></span>
+    <span>S2=<span id="c-s2">—</span></span>
+  </div>
+</div>
+
+<!-- Еженедельный отчёт -->
+<div class="card" id="weekly-card">
+  <div class="card-title">Отчёт за неделю <span id="weekly-period" style="font-weight:normal;text-transform:none;letter-spacing:0;color:#3d444d"></span></div>
+  <div class="weekly-grid" id="weekly-grid"></div>
+</div>
+
+<!-- События VPN (watchdog) -->
+<div class="card">
+  <div class="card-title">
+    События VPN
+    <button class="small" onclick="loadEvents()" style="margin-left:auto">↺</button>
+  </div>
+  <div class="log-box" id="events-log"><div class="log-line info"><span class="lmsg">Загрузка...</span></div></div>
+</div>
+
+<!-- Лог действий -->
+<div class="card">
+  <div class="card-title">Лог действий</div>
+  <div class="log-box" id="log"><div class="log-line"><span class="lmsg">Готово.</span></div></div>
+</div>
+
+<script>
+var _conf = null;
+var _prevRx = null, _prevTx = null, _prevTs = null;
+
+// ── Drop-зона ────────────────────────────────────────────────────
+var drop = document.getElementById('drop');
+drop.addEventListener('dragover', function(e){ e.preventDefault(); drop.classList.add('over'); });
+drop.addEventListener('dragleave', function(){ drop.classList.remove('over'); });
+drop.addEventListener('drop', function(e){
+    e.preventDefault(); drop.classList.remove('over');
+    if (e.dataTransfer.files[0]) onFile(e.dataTransfer.files[0]);
+});
+
+function onFile(f) {
+    if (!f) return;
+    document.getElementById('file-name').textContent = f.name + ' (' + Math.round(f.size/1024*10)/10 + ' KB)';
+    var r = new FileReader();
+    r.onload = function(e) {
+        _conf = e.target.result;
+        var ok = _conf.indexOf('[Interface]') >= 0 && _conf.indexOf('PrivateKey') >= 0;
+        drop.classList.toggle('has-file', ok);
+        document.getElementById('btn-apply').disabled = !ok;
+        addLog(ok ? 'Файл загружен, нажми «Применить конфиг»' : 'Неверный конфиг', ok ? '' : 'err');
+    };
+    r.readAsText(f);
+}
+
+// ── Применение конфига ───────────────────────────────────────────
+function applyConfig() {
+    if (!_conf) return;
+    var btn = document.getElementById('btn-apply');
+    btn.disabled = true; btn.textContent = 'Применяем...';
+    addLog('Отправляем конфиг...');
+    fetch('/cgi-bin/awg_upload', {
+        method: 'POST', headers: {'Content-Type': 'text/plain'}, body: _conf
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+        btn.textContent = 'Применить конфиг';
+        if (d.ok) {
+            addLog('Конфиг применён. Туннель поднимается...', 'ok');
+            showConfCard(d);
+            setTimeout(pollStatus, 3000);
+        } else {
+            btn.disabled = false;
+            addLog('Ошибка: ' + (d.msg || 'неизвестная'), 'err');
+        }
+    })
+    .catch(function(e){ btn.disabled = false; btn.textContent = 'Применить конфиг'; addLog('Ошибка: '+e,'err'); });
+}
+
+function showConfCard(d) {
+    document.getElementById('conf-card').style.display = 'block';
+    setText('c-addr', d.address || '—'); setText('c-dns', d.dns || '—');
+    setText('c-ep', d.endpoint || '—'); setText('c-aips', d.allowed_ips || '—');
+    setText('c-mtu', d.mtu || '—'); setText('c-ka', d.keepalive ? d.keepalive + ' сек' : '—');
+    var badge = document.getElementById('conf-proto-badge');
+    if (d.obfuscated) {
+        badge.textContent = 'AmneziaWG'; badge.className = 'badge ok';
+        document.getElementById('c-obf').style.display = 'flex';
+        setText('c-jc', d.jc || '—'); setText('c-jmin', d.jmin || '—');
+        setText('c-jmax', d.jmax || '—'); setText('c-s1', d.s1 || '—'); setText('c-s2', d.s2 || '—');
+    } else {
+        badge.textContent = 'WireGuard'; badge.className = 'badge info';
+        document.getElementById('c-obf').style.display = 'none';
+    }
+}
+
+// ── Управление режимом VPN ───────────────────────────────────────
+function setVpnMode(enable) {
+    var action = enable ? 'vpn_enable' : 'vpn_disable';
+    var btnOn = document.getElementById('btn-vpn-on');
+    var btnOff = document.getElementById('btn-vpn-off');
+    btnOn.disabled = btnOff.disabled = true;
+    addLog(enable ? 'Включаем VPN...' : 'Выключаем VPN...');
+    fetch('/cgi-bin/awg_control', {
+        method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'action=' + action
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+        addLog(d.msg || (d.ok ? 'Готово' : 'Ошибка'), d.ok ? 'ok' : 'err');
+        btnOn.disabled = btnOff.disabled = false;
+        setTimeout(pollStatus, 3500);
+    })
+    .catch(function(e){ addLog('Ошибка: '+e,'err'); btnOn.disabled = btnOff.disabled = false; });
+}
+
+// ── Управление туннелем ──────────────────────────────────────────
+function ctrl(action) {
+    var labels = {up:'Подключаем...', down:'Отключаем...', restart:'Перезапускаем...'};
+    addLog(labels[action] || action);
+    fetch('/cgi-bin/awg_control', {
+        method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'action=' + action
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+        addLog(d.msg || (d.ok ? 'Готово' : 'Ошибка'), d.ok ? 'ok' : 'err');
+        setTimeout(pollStatus, 3500);
+    })
+    .catch(function(e){ addLog('Ошибка: '+e,'err'); });
+}
+
+function retrySetup() {
+    addLog('Запускаем настройку...');
+    document.getElementById('btn-retry').disabled = true;
+    fetch('/cgi-bin/awg_control', {
+        method: 'POST', headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'action=retry_setup'
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+        addLog(d.msg || (d.ok ? 'Запущено' : 'Ошибка'), d.ok ? 'ok' : 'err');
+        document.getElementById('btn-retry').disabled = false;
+        if (d.ok) setTimeout(pollStatus, 6000);
+    })
+    .catch(function(e){ addLog('Ошибка: '+e,'err'); document.getElementById('btn-retry').disabled=false; });
+}
+
+// ── Системный монитор ────────────────────────────────────────────
+function renderSysmon(sys) {
+    if (!sys) return;
+    document.getElementById('sys-card').style.display = 'block';
+
+    var cpu = sys.cpu || 0;
+    var barCpu = document.getElementById('bar-cpu');
+    barCpu.style.width = cpu + '%';
+    barCpu.className = 'bar cpu' + (cpu > 80 ? ' err' : cpu > 60 ? ' warn' : '');
+    document.getElementById('val-cpu').textContent = cpu + '%';
+
+    var memPct = sys.mem_total > 0 ? Math.round(sys.mem_used / sys.mem_total * 100) : 0;
+    var barMem = document.getElementById('bar-mem');
+    barMem.style.width = memPct + '%';
+    barMem.className = 'bar mem' + (memPct > 80 ? ' err' : memPct > 60 ? ' warn' : '');
+    document.getElementById('val-mem').textContent = sys.mem_used + '/' + sys.mem_total + ' MB';
+
+    document.getElementById('val-up').textContent = fmtUptime(sys.uptime || 0);
+    document.getElementById('val-dev').textContent = (sys.devices || 0) + ' устройств';
+
+    // Скорость сети
+    var now = Date.now();
+    if (_prevRx !== null && _prevTs !== null && now > _prevTs) {
+        var dt = (now - _prevTs) / 1000;
+        var rxRate = Math.max(0, (sys.wan_rx - _prevRx) / dt);
+        var txRate = Math.max(0, (sys.wan_tx - _prevTx) / dt);
+        setText('s-rx', fmtBytes(rxRate) + '/s');
+        setText('s-tx', fmtBytes(txRate) + '/s');
+    }
+    _prevRx = sys.wan_rx; _prevTx = sys.wan_tx; _prevTs = now;
+
+    document.getElementById('s-load').textContent = sys.load || '—';
+
+    if (sys.wan_port) {
+        setText('s-wan', sys.wan_port);
+        document.getElementById('s-wan-wrap').style.display = '';
+    }
+
+    // Еженедельный отчёт
+    if (sys.weekly) renderWeekly(sys.weekly);
+}
+
+function renderWeekly(w) {
+    var card = document.getElementById('weekly-card');
+    card.style.display = 'block';
+    document.getElementById('weekly-period').textContent = w.week_start || '';
+
+    var items = [
+        {v: (w.vpn_uptime_pct || 0).toFixed(1) + '%', l: 'VPN аптайм'},
+        {v: w.failover_total || 0, l: 'Failover'},
+        {v: w.recovery_total || 0, l: 'Восстановлений'},
+        {v: w.service_restarts || 0, l: 'Рестартов сервисов'},
+        {v: w.devices || 0, l: 'Устройств'}
+    ];
+    var grid = document.getElementById('weekly-grid');
+    grid.innerHTML = '';
+    items.forEach(function(i) {
+        var d = document.createElement('div');
+        d.className = 'weekly-item';
+        d.innerHTML = '<div class="wv">' + i.v + '</div><div class="wl">' + i.l + '</div>';
+        grid.appendChild(d);
+    });
+}
+
+// ── VPN режим ────────────────────────────────────────────────────
+function renderMode(mode, userMode) {
+    var modeEl = document.getElementById('mode-text');
+    var btnOn  = document.getElementById('btn-vpn-on');
+    var btnOff = document.getElementById('btn-vpn-off');
+
+    var labels = {
+        vpn:        {t: 'VPN активен', c: 'vpn'},
+        fallback:   {t: 'Прямой интернет (VPN недоступен)', c: 'fallback'},
+        manual_off: {t: 'VPN выключен вручную', c: 'off'},
+        no_config:  {t: 'VPN не настроен', c: 'none'}
+    };
+    var lbl = labels[mode] || {t: mode || '—', c: 'none'};
+    modeEl.textContent = lbl.t;
+    modeEl.className = 'mode-val ' + lbl.c;
+
+    var isOff = (mode === 'manual_off' || userMode === 'off');
+    btnOn.style.display  = isOff ? '' : 'none';
+    btnOff.style.display = isOff ? 'none' : '';
+}
+
+// ── Опрос статуса ────────────────────────────────────────────────
+function pollStatus() {
+    fetch('/cgi-bin/awg_status?_=' + Date.now())
+    .then(function(r){ return r.json(); })
+    .then(renderStatus)
+    .catch(function(){ renderStatus(null); });
+}
+
+function renderStatus(s) {
+    if (!s) {
+        setDot('err'); setText('status-text', 'Нет ответа от роутера');
+        showBanner('err', 'Нет ответа — работает ли uhttpd?', false);
+        return;
+    }
+
+    renderSetupBanner(s.setup);
+    renderSysmon(s.sys);
+    renderMode(s.mode, s.user_mode);
+
+    if (!s.configured) {
+        setDot('off'); setText('status-text', 'Не настроен');
+        hide('meta'); hide('stats');
+        if (!s.error) showMainAlert('warn', 'Загрузи .conf файл ниже');
+        else          showMainAlert('err', 'AWG не установлен: ' + s.error);
+        return;
+    }
+    if (!s.up) {
+        setDot('err'); setText('status-text', 'Интерфейс выключен');
+        hide('meta'); hide('stats');
+        if (s.mode !== 'manual_off') showMainAlert('err', 'awg0 выключен. Нажми «Подключить».');
+        return;
+    }
+
+    show('meta'); show('stats');
+    setText('m-ip', s.tunnel_ip     || '—');
+    setText('m-ep', s.peer_endpoint || '—');
+    setText('m-hs', s.handshake_age >= 0 ? fmtAge(s.handshake_age) : 'нет хэндшейка');
+    setText('m-rx', s.rx || '—'); setText('m-tx', s.tx || '—');
+
+    if (s.connected) {
+        setDot('ok'); setText('status-text', 'Подключён');
+        hideMainAlert();
+    } else {
+        setDot('warn'); setText('status-text', 'Нет хэндшейка');
+        showMainAlert('warn', 'Интерфейс поднят, хэндшейка нет. Проверь endpoint.');
+    }
+}
+
+function renderSetupBanner(setup) {
+    if (!setup || setup.status === 'unknown' || setup.status === 'done') {
+        hideSetupBanner(); return;
+    }
+    if (setup.status === 'running') {
+        showSetupBanner('info', 'Первичная настройка в процессе...', false);
+        setTimeout(pollStatus, 4000); return;
+    }
+    if (setup.status === 'failed' || setup.status === 'partial') {
+        var parts = [];
+        if (setup.pkg && setup.pkg.indexOf('fail') === 0) parts.push('пакеты: ' + setup.pkg.replace('fail:',''));
+        if (setup.uci && setup.uci.indexOf('fail') === 0) parts.push('UCI: ' + setup.uci.replace('fail:',''));
+        var det = parts.length ? ' (' + parts.join('; ') + ')' : '';
+        showSetupBanner('err', (setup.status === 'failed' ? 'Ошибка настройки' : 'Частичная настройка') + det, true);
+        return;
+    }
+    hideSetupBanner();
+}
+
+function showSetupBanner(type, msg, retry) {
+    var el = document.getElementById('setup-alert');
+    el.className = 'alert ' + type + ' show';
+    document.getElementById('setup-alert-msg').textContent = '⚠ ' + msg;
+    document.getElementById('btn-retry').style.display = retry ? '' : 'none';
+}
+function hideSetupBanner() { document.getElementById('setup-alert').className = 'alert'; }
+function showMainAlert(type, msg) {
+    var a = document.getElementById('setup-alert');
+    if (a.classList.contains('show') && a.classList.contains('err')) return;
+    showSetupBanner(type, msg, false);
+}
+function hideMainAlert() {
+    var a = document.getElementById('setup-alert');
+    if (!a.classList.contains('err') || !document.getElementById('btn-retry').style.display) {
+        hideSetupBanner();
+    }
+}
+function showBanner(t, m, r) { showSetupBanner(t, m, r); }
+
+// ── События VPN (watchdog.log) ───────────────────────────────────
+function loadEvents() {
+    fetch('/cgi-bin/awg_log?_=' + Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+        var box = document.getElementById('events-log');
+        if (!d.lines || !d.lines.length) {
+            box.innerHTML = '<div class="log-line info"><span class="lts"></span><span class="lmsg">Нет событий (watchdog ещё не запускался)</span></div>';
+            return;
+        }
+        box.innerHTML = '';
+        var lines = d.lines.slice().reverse();
+        lines.forEach(function(l) {
+            var cls = 'log-line';
+            var msg = l.msg || '';
+            if (msg.indexOf('OK ')    === 0) cls += ' ok';
+            else if (msg.indexOf('WARN ') === 0) cls += ' warn';
+            else if (msg.indexOf('ERR ')  === 0) cls += ' err';
+            else                                  cls += ' info';
+            var div = document.createElement('div');
+            div.className = cls;
+            div.innerHTML = '<span class="lts">' + (l.ts || '') + '</span>' +
+                            '<span class="lmsg">' + esc(msg) + '</span>';
+            box.appendChild(div);
+        });
+    })
+    .catch(function(){ /* events не критичны */ });
+}
+
+// ── Утилиты ──────────────────────────────────────────────────────
+function setDot(cls) { document.getElementById('dot').className = 'dot ' + cls; }
+function setText(id, v) { var e = document.getElementById(id); if(e) e.textContent = v; }
+function show(id) { var e = document.getElementById(id); if(e) e.style.display = ''; }
+function hide(id) { var e = document.getElementById(id); if(e) e.style.display = 'none'; }
+
+function esc(s) {
+    return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function fmtAge(s) {
+    if (s < 0)    return 'никогда';
+    if (s < 60)   return s + 'с';
+    if (s < 3600) return Math.floor(s/60) + 'м ' + (s%60) + 'с';
+    return Math.floor(s/3600) + 'ч';
+}
+
+function fmtUptime(s) {
+    var d = Math.floor(s/86400), h = Math.floor(s%86400/3600), m = Math.floor(s%3600/60);
+    if (d > 0) return d + 'д ' + h + 'ч ' + m + 'м';
+    if (h > 0) return h + 'ч ' + m + 'м';
+    return m + 'м';
+}
+
+function fmtBytes(b) {
+    if (b < 1024)       return Math.round(b) + ' B';
+    if (b < 1048576)    return (b/1024).toFixed(1) + ' KB';
+    if (b < 1073741824) return (b/1048576).toFixed(1) + ' MB';
+    return (b/1073741824).toFixed(2) + ' GB';
+}
+
+function addLog(msg, cls) {
+    var log = document.getElementById('log');
+    var now = new Date();
+    var ts = now.getHours().toString().padStart(2,'0') + ':' +
+             now.getMinutes().toString().padStart(2,'0') + ':' +
+             now.getSeconds().toString().padStart(2,'0');
+    var line = document.createElement('div');
+    line.className = 'log-line' + (cls ? ' ' + cls : '');
+    line.innerHTML = '<span class="lts">' + ts + '</span><span class="lmsg">' + esc(msg) + '</span>';
+    log.insertBefore(line, log.firstChild);
+    while (log.children.length > 40) log.removeChild(log.lastChild);
+}
+
+// ── Установка на диск ────────────────────────────────────────────
+var _diskSelected = null;
+var _diskPollTimer = null;
+
+function loadDisks() {
+    fetch('/cgi-bin/awg_disk?_=' + Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+        var el = document.getElementById('disk-list');
+        if (!d.ok || !d.disks || !d.disks.length) {
+            el.innerHTML = '<div style="color:#8b949e;font-size:12px">Нет подходящих дисков (нужно ≥ 1 ГБ)</div>';
+            return;
+        }
+        var html = '';
+        d.disks.forEach(function(disk){
+            var cls = disk.is_boot ? 'disk-item disabled' : 'disk-item';
+            var badge = disk.is_boot ? ' <span class="disk-boot-badge">загрузочный</span>' : '';
+            html += '<div class="' + cls + '" onclick="selectDisk(this,\'' + disk.dev + '\')" data-dev="' + disk.dev + '">';
+            html += '<span class="disk-dev">' + disk.dev + '</span>';
+            html += '<span class="disk-info">' + (disk.model || 'Disk') + badge + '</span>';
+            html += '<span class="disk-size">' + disk.size_gb + ' ГБ</span>';
+            html += '</div>';
+        });
+        el.innerHTML = html;
+        _diskSelected = null;
+        document.getElementById('btn-install-disk').disabled = true;
+    })
+    .catch(function(){
+        document.getElementById('disk-list').innerHTML = '<div style="color:#8b949e;font-size:12px">awg_disk недоступен (только PC-вариант)</div>';
+        document.getElementById('disk-card').style.display = 'none';
+    });
+}
+
+function selectDisk(el, dev) {
+    if (el.classList.contains('disabled')) return;
+    document.querySelectorAll('.disk-item').forEach(function(i){ i.classList.remove('selected'); });
+    el.classList.add('selected');
+    _diskSelected = dev;
+    document.getElementById('btn-install-disk').disabled = false;
+}
+
+function installToDisk() {
+    if (!_diskSelected) return;
+    if (!confirm('Установить образ на ' + _diskSelected + '?\n\nВСЕ ДАННЫЕ НА ДИСКЕ БУДУТ УДАЛЕНЫ!\n\nНе отключай питание во время установки.')) return;
+    document.getElementById('btn-install-disk').disabled = true;
+    var prog = document.getElementById('disk-progress');
+    prog.style.display = 'block';
+    prog.innerHTML = '⏳ Установка на ' + _diskSelected + '... (~3-5 мин, не закрывай страницу)';
+    fetch('/cgi-bin/awg_disk', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: 'action=install&target=' + encodeURIComponent(_diskSelected)
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+        if (!d.ok) { prog.innerHTML = '❌ ' + d.msg; return; }
+        prog.innerHTML = '⏳ ' + d.msg;
+        _diskPollTimer = setInterval(function(){
+            fetch('/cgi-bin/awg_disk', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                body: 'action=status'
+            })
+            .then(function(r){ return r.json(); })
+            .then(function(s){
+                if (s.status === 'done') {
+                    clearInterval(_diskPollTimer);
+                    prog.innerHTML = '✅ Установка завершена! Выключи ПК, извлеки USB и загрузись с диска.';
+                } else if (s.status === 'fail') {
+                    clearInterval(_diskPollTimer);
+                    prog.innerHTML = '❌ Ошибка установки. Проверь диск и попробуй снова.';
+                    document.getElementById('btn-install-disk').disabled = false;
+                }
+            });
+        }, 3000);
+    })
+    .catch(function(){ prog.innerHTML = '❌ Ошибка запроса'; });
+}
+
+// ── Инициализация ────────────────────────────────────────────────
+pollStatus();
+loadEvents();
+loadDisks();
+setInterval(pollStatus, 8000);
+setInterval(loadEvents, 30000);
+</script>
+</body>
+</html>

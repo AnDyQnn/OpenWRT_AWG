@@ -1,0 +1,13 @@
+[Unit]
+Description=Per-client traffic accounting for panel (live per-device speeds)
+After=wan-detect.service gateway-compose.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/client-traffic.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

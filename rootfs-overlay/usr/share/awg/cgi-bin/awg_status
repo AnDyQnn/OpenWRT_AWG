@@ -1,0 +1,73 @@
+#!/bin/sh
+printf 'Content-Type: application/json\r\nCache-Control: no-cache\r\n\r\n'
+
+je() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+LOAD1=$(awk '{print $1}' /proc/loadavg 2>/dev/null || echo "0.00")
+LOAD_STR=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || echo "0.00 0.00 0.00")
+CPU_CORES=$(nproc 2>/dev/null || echo 1)
+CPU_PCT=$(awk -v l="$LOAD1" -v c="$CPU_CORES" 'BEGIN{v=int(l/c*100);if(v>100)v=100;print v}')
+MEM_TOTAL=$(awk '/MemTotal:/{printf "%d",$2/1024}' /proc/meminfo 2>/dev/null || echo 0)
+MEM_AVAIL=$(awk '/MemAvailable:/{printf "%d",$2/1024}' /proc/meminfo 2>/dev/null || echo 0)
+MEM_USED=$((MEM_TOTAL - MEM_AVAIL))
+UPTIME_SEC=$(awk '{printf "%d",$1}' /proc/uptime 2>/dev/null || echo 0)
+
+WAN_PORT=$(cat /run/awg-setup/wan-port 2>/dev/null || cat /etc/awg-setup/wan-port 2>/dev/null || echo "")
+WAN_RX=0; WAN_TX=0
+if [ -n "$WAN_PORT" ]; then
+    WAN_RX=$(cat "/sys/class/net/${WAN_PORT}/statistics/rx_bytes" 2>/dev/null || echo 0)
+    WAN_TX=$(cat "/sys/class/net/${WAN_PORT}/statistics/tx_bytes" 2>/dev/null || echo 0)
+fi
+DEVICES=$(wc -l < /var/lib/misc/dnsmasq.leases 2>/dev/null | tr -d ' ')
+[ -z "$DEVICES" ] && DEVICES=0
+
+MODE=$(cat /run/awg-mode 2>/dev/null || echo "no_config")
+USER_MODE=$(cat /etc/awg-setup/user-mode 2>/dev/null || echo "vpn")
+
+WEEKLY=""
+[ -f /etc/awg-setup/weekly-report.json ] && \
+    WEEKLY=$(tr -d '\n' < /etc/awg-setup/weekly-report.json 2>/dev/null)
+
+SYS_JSON='"sys":{"cpu":'"$CPU_PCT"',"mem_used":'"$MEM_USED"',"mem_total":'"$MEM_TOTAL"',"uptime":'"$UPTIME_SEC"',"load":"'"$(je "$LOAD_STR")"'","devices":'"$DEVICES"',"wan_port":"'"$(je "$WAN_PORT")"'","wan_rx":'"${WAN_RX:-0}"',"wan_tx":'"${WAN_TX:-0}"'}'
+[ -n "$WEEKLY" ] && SYS_JSON="${SYS_JSON},\"weekly\":${WEEKLY}"
+MODE_JSON='"mode":"'"$(je "$MODE")"'","user_mode":"'"$(je "$USER_MODE")"'"'
+
+CONF="/etc/amnezia/awg0.conf"
+
+if ! command -v awg >/dev/null 2>&1; then
+    printf '{%s,%s,"configured":false,"up":false,"connected":false,"error":"awg not installed"}' "$SYS_JSON" "$MODE_JSON"
+    exit 0
+fi
+
+if [ ! -f "$CONF" ]; then
+    printf '{%s,%s,"configured":false,"up":false,"connected":false}' "$SYS_JSON" "$MODE_JSON"
+    exit 0
+fi
+
+if ! ip link show awg0 >/dev/null 2>&1; then
+    ADDR=$(grep -E '^Address\s*=' "$CONF" | awk -F'[= ]+' '{print $2}' | head -1)
+    printf '{%s,%s,"configured":true,"up":false,"connected":false,"tunnel_ip":"%s"}' \
+        "$SYS_JSON" "$MODE_JSON" "$(je "$ADDR")"
+    exit 0
+fi
+
+TUNNEL_IP=$(ip addr show awg0 2>/dev/null | awk '/inet /{print $2;exit}')
+AWG=$(WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go awg show awg0 2>/dev/null)
+PUB_KEY=$(printf '%s' "$AWG" | awk '/public key:/{print $3}')
+ENDPOINT=$(printf '%s' "$AWG" | awk '/endpoint:/{print $2}')
+TRANSFER=$(printf '%s' "$AWG" | sed -n 's/.*transfer: //p')
+RX=$(printf '%s' "$TRANSFER" | sed 's/ received.*//')
+TX=$(printf '%s' "$TRANSFER" | awk -F', ' '{print $2}' | sed 's/ sent//')
+HS_STR=$(printf '%s' "$AWG" | sed -n 's/.*latest handshake: //p')
+
+CONNECTED=false; HANDSHAKE_AGE=-1
+HS_TS=$(WG_QUICK_USERSPACE_IMPLEMENTATION=amneziawg-go awg show awg0 latest-handshakes 2>/dev/null | awk '{print $2;exit}')
+if [ -n "$HS_TS" ] && [ "$HS_TS" -gt 0 ] 2>/dev/null; then
+    HANDSHAKE_AGE=$(($(date +%s) - HS_TS))
+    [ "$HANDSHAKE_AGE" -lt 180 ] && CONNECTED=true
+fi
+
+printf '{%s,%s,"configured":true,"up":true,"connected":%s,"tunnel_ip":"%s","public_key":"%s","peer_endpoint":"%s","handshake_str":"%s","handshake_age":%s,"rx":"%s","tx":"%s"}' \
+    "$SYS_JSON" "$MODE_JSON" \
+    "$CONNECTED" "$(je "$TUNNEL_IP")" "$(je "$PUB_KEY")" "$(je "$ENDPOINT")" \
+    "$(je "$HS_STR")" "$HANDSHAKE_AGE" "$(je "$RX")" "$(je "$TX")"

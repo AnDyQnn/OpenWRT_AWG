@@ -1,0 +1,92 @@
+#!/bin/sh
+# CGI: установка образа на диск ПК прямо из браузера.
+# GET  → список дисков + текущий загрузочный
+# POST action=install&target=/dev/sdX → запуск dd в фоне
+# POST action=status → статус установки
+
+printf 'Content-Type: application/json\r\nCache-Control: no-cache\r\n\r\n'
+
+je() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+json_err() { printf '{"ok":false,"msg":"%s"}' "$(je "$1")"; exit 0; }
+
+# Определяем загрузочный диск (источник для dd)
+_boot_disk() {
+    local root_dev
+    root_dev=$(awk '$2=="/"{print $1}' /proc/mounts 2>/dev/null \
+        | grep -v tmpfs | head -1)
+    [ -z "$root_dev" ] && root_dev=$(cat /proc/cmdline 2>/dev/null \
+        | grep -oE 'root=[^ ]+' | cut -d= -f2 | head -1)
+    # /dev/sda2 -> /dev/sda,  /dev/nvme0n1p2 -> /dev/nvme0n1
+    printf '%s' "$root_dev" \
+        | sed 's/[0-9]*$//' \
+        | sed 's/p$//'
+}
+
+# Список блочных устройств (только целые диски ≥ 1 ГБ)
+_list_disks() {
+    local boot
+    boot=$(_boot_disk)
+    printf '['
+    local first=1
+    for dev in /dev/sd? /dev/nvme?n? /dev/mmcblk?; do
+        [ -b "$dev" ] || continue
+        local size model is_boot
+        size=$(cat "/sys/class/block/${dev##*/}/size" 2>/dev/null || echo 0)
+        # size в 512-байтных секторах; нам нужно > 2 млн (1 ГБ)
+        [ "$size" -lt 2097152 ] 2>/dev/null && continue
+        model=$(cat "/sys/class/block/${dev##*/}/device/model" 2>/dev/null \
+            | tr -d '\n' | xargs 2>/dev/null || echo "")
+        size_gb=$(awk "BEGIN{printf \"%.0f\", $size*512/1073741824}")
+        is_boot="false"
+        [ "$dev" = "$boot" ] && is_boot="true"
+        [ $first -eq 0 ] && printf ','
+        printf '{"dev":"%s","model":"%s","size_gb":%s,"is_boot":%s}' \
+            "$(je "$dev")" "$(je "$model")" "$size_gb" "$is_boot"
+        first=0
+    done
+    printf ']'
+}
+
+if [ "$REQUEST_METHOD" != "POST" ]; then
+    boot=$(_boot_disk)
+    disks=$(_list_disks)
+    printf '{"ok":true,"boot_disk":"%s","disks":%s}' "$(je "$boot")" "$disks"
+    exit 0
+fi
+
+CL=${CONTENT_LENGTH:-256}
+BODY=$(head -c "$CL")
+ACTION=$(printf '%s' "$BODY" | grep -oE 'action=[a-z_]+' | cut -d= -f2 | head -1)
+
+case "$ACTION" in
+    install)
+        TARGET=$(printf '%s' "$BODY" \
+            | grep -oE 'target=[^&]+' | cut -d= -f2 \
+            | sed 's/%2F/\//g; s/+/ /g')
+        [ -n "$TARGET" ] || json_err "Не указан target"
+        printf '%s' "$TARGET" \
+            | grep -qE '^/dev/(sd[a-z]|nvme[0-9]+n[0-9]+|mmcblk[0-9]+)$' \
+            || json_err "Недопустимое устройство"
+        [ -b "$TARGET" ] || json_err "Устройство не найдено: $TARGET"
+        BOOT=$(_boot_disk)
+        [ "$TARGET" = "$BOOT" ] && json_err "Нельзя устанавливать на загрузочный диск"
+        [ -n "$BOOT" ] && [ -b "$BOOT" ] || json_err "Не удалось определить загрузочный диск"
+        # Запуск dd в фоне
+        printf 'running\n' > /tmp/awg_disk_status
+        (
+            dd if="$BOOT" of="$TARGET" bs=4M conv=fsync 2>/tmp/awg_disk_dd \
+                && sync \
+                && printf 'done\n' > /tmp/awg_disk_status \
+                || printf 'fail\n'  > /tmp/awg_disk_status
+        ) &
+        printf '{"ok":true,"msg":"Установка запущена: %s → %s. Не отключай питание (~3-5 мин). Следи за статусом."}' \
+            "$(je "$BOOT")" "$(je "$TARGET")"
+        ;;
+    status)
+        STATUS=$(cat /tmp/awg_disk_status 2>/dev/null || printf 'idle')
+        printf '{"ok":true,"status":"%s"}' "$(je "$STATUS")"
+        ;;
+    *)
+        json_err "Неизвестное действие"
+        ;;
+esac

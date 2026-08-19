@@ -1,0 +1,12 @@
+[Unit]
+Description=Gateway swap file (OOM safety for office load)
+After=gateway-growroot.service local-fs.target
+Before=docker.service gateway-compose.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/gateway-swap.sh
+
+[Install]
+WantedBy=multi-user.target

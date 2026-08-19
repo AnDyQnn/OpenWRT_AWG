@@ -1,0 +1,95 @@
+# Сервисы работают в режиме host network — видят br-lan и WAN напрямую.
+# Запуск: docker compose up -d --build  (при первом старте)
+# Статус: docker compose ps
+#
+# Ротация логов: у каждого сервиса json-file драйвер ограничен 3 файлами по 10 МБ
+# (макс ~30 МБ на сервис) — чтобы логи Docker не забили диск.
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+
+  # AmneziaWG VPN туннель
+  awg:
+    image: gateway-awg:latest
+    build: ./awg
+    container_name: gw-awg
+    network_mode: host
+    privileged: true
+    logging: *default-logging
+    volumes:
+      - /etc/amnezia:/config
+      - /run:/run
+      - /var/log:/var/log
+      - /etc/awg-setup:/etc/awg-setup
+      # Единое время с хостом (журнал событий — один TZ во всех сервисах).
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    restart: unless-stopped
+
+  # DHCP сервер для LAN
+  dnsmasq:
+    image: gateway-dnsmasq:latest
+    build: ./dnsmasq
+    container_name: gw-dnsmasq
+    network_mode: host
+    logging: *default-logging
+    cap_add:
+      - NET_ADMIN
+      - NET_BROADCAST
+      - NET_RAW
+    volumes:
+      - /run/awg-setup:/run/awg-setup:ro
+      # Файл аренд DHCP пишем на хост, чтобы его видели webui (панель
+      # «Подключённые устройства») и консольный gateway-status.
+      - /var/lib/misc:/var/lib/misc
+      # Каталог фильтра доступа: блок-лист сайтов пишет webui, dnsmasq читает.
+      - /etc/awg-setup/filter:/etc/dnsmasq.d/filter:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+    restart: unless-stopped
+
+  # Веб-панель /awg/ (FastAPI-дашборд + nginx)
+  webui:
+    image: gateway-webui:latest
+    build: ./webui
+    container_name: gw-webui
+    network_mode: host
+    # PID-namespace хоста — чтобы веб-консоль через nsenter заходила в shell
+    # самого шлюза (PID 1 хоста), а не контейнера.
+    pid: host
+    logging: *default-logging
+    volumes:
+      - /etc/amnezia:/etc/amnezia
+      - /etc/awg-setup:/etc/awg-setup
+      - /run:/run
+      - /var/log:/var/log
+      # ВАЖНО: НЕ монтируем /proc и /sys/class/net.
+      # При network_mode: host контейнер и так видит хостовую статистику
+      # (/proc/stat, /proc/meminfo, /proc/loadavg не изолированы по PID;
+      #  сетевые счётчики — из общего сетевого namespace хоста).
+      # Монтирование host /proc поверх /proc контейнера ломает его создание
+      # на старых ядрах/runc (контейнер падает с кодом 255).
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Аренды DHCP (для списка «Подключённые устройства»), пишет gw-dnsmasq.
+      - /var/lib/misc:/var/lib/misc:ro
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
+      # Бэкапы шлюза (создание/восстановление из панели).
+      - /opt/gateway-backups:/opt/gateway-backups
+    # Снижение привилегий (пентест-фикс): вместо privileged:true — только нужные
+    # capabilities. SYS_ADMIN+SYS_PTRACE — для nsenter в namespace хоста (веб-консоль,
+    # управление хостом), NET_ADMIN — для iptables/fail2ban. seccomp по умолчанию
+    # остаётся включён, доступ к устройствам отозван. AppArmor unconfined нужен для
+    # операций в mount-namespace хоста после nsenter.
+    cap_add:
+      - SYS_ADMIN
+      - SYS_PTRACE
+      - NET_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    restart: unless-stopped

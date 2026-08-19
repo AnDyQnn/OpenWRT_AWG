@@ -1,0 +1,12 @@
+{
+  "version": "2.11.1",
+  "channel": "upd-code",
+  "released": "2026-08-19T18:51:55Z",
+  "images": {
+    "gateway-awg":     "ghcr.io/andyqnn/openwrt-awg/awg@sha256:e6f04afa91f4e65722cff4d5521d53de40f5a56ba89c5c2fd802f66223de5062",
+    "gateway-dnsmasq": "ghcr.io/andyqnn/openwrt-awg/dnsmasq@sha256:d33c552428e73eddabca50e19fb450251671da9db509ddff72910d6106c174e5",
+    "gateway-webui":   "ghcr.io/andyqnn/openwrt-awg/webui@sha256:b6c2d0ee8ba0b291ef7bcb66e03b6774bd97ec121076c66c850149501e5eec33"
+  },
+  "min_from_version": "2.0.0",
+  "changelog": "Доки: прямая ссылка на последний релиз в build.md"
+}

@@ -1,0 +1,6 @@
+# Шрифт консоли с поддержкой кириллицы (иначе русский текст = квадратики).
+ACTIVE_CONSOLES="/dev/tty[1-6]"
+CHARMAP="UTF-8"
+CODESET="CyrSlav"
+FONTFACE="Fixed"
+FONTSIZE="16"
