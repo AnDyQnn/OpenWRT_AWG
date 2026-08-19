@@ -370,6 +370,14 @@ do_apply(){
     # host-конфиги безопасности из rootfs-overlay (sshd-порт, fail2ban) + переприменение
     # фаервола. Без этого security-фичи (нестандартный SSH-порт, fail2ban, закрытие WAN)
     # не активируются на уже РАЗВЁРНУТОМ шлюзе без ребута — только на свежем .img.
+    # Порт SSH — состояние: он в 20-gateway-port.conf, которого в репозитории нет.
+    # Гарантируем, что файл существует, ДО подкладывания конфигов: на машинах со
+    # старой раскладкой порт лежит в 10-gateway.conf, который мы сейчас перезапишем
+    # версией уже без Port — без переноса sshd после reload уехал бы на 22, и
+    # удалённый доступ оборвался бы прямо посреди наката.
+    if [ -x /usr/local/bin/gateway-ssh-port.sh ]; then
+        /usr/local/bin/gateway-ssh-port.sh ensure >/dev/null 2>&1
+    fi
     if [ -d "$STAGING/rootfs-overlay/etc/ssh/sshd_config.d" ]; then
         cp -a "$STAGING/rootfs-overlay/etc/ssh/sshd_config.d/." /etc/ssh/sshd_config.d/ 2>/dev/null
         sshd -t 2>/dev/null && systemctl reload ssh 2>/dev/null || systemctl restart ssh 2>/dev/null

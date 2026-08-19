@@ -13,6 +13,12 @@ mkdir -p /etc/awg-setup /etc/amnezia /run/awg-stats /var/log
 # Лог неудачных входов в панель (его читает fail2ban). Должен существовать до старта.
 [ -f /var/log/panel-auth.log ] || : > /var/log/panel-auth.log
 
+# SSH-порт этой установки (состояние, не код). На свежей машине генерится
+# случайный, на обновлённой — переносится из старого 10-gateway.conf.
+if [ -x /usr/local/bin/gateway-ssh-port.sh ]; then
+    LOG "SSH-порт: $(/usr/local/bin/gateway-ssh-port.sh ensure)"
+fi
+
 # Включаем IP-форвардинг
 echo 1 > /proc/sys/net/ipv4/ip_forward
 grep -q 'net.ipv4.ip_forward' /etc/sysctl.conf \

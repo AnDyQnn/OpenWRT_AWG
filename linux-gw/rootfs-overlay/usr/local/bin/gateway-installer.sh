@@ -73,6 +73,24 @@ else
     TARGET="${TGT[$((N-1))]}"
 fi
 
+# ── SSH port ──────────────────────────────────────────────────────────────────
+# Port is NOT hardcoded in the project: it would be published in the public repo,
+# so every installation would run SSH on a known port. A random one is generated
+# per installation; here the owner may pick their own.
+SUGGESTED=$(/usr/local/bin/gateway-ssh-port.sh ensure 2>/dev/null || echo 22)
+echo ""
+echo -e "  ${BOLD}SSH port${NC} (WAN closed by firewall; LAN and VPN only)"
+printf "  Press Enter to keep %s, or type your own [1-65535]: " "$SUGGESTED"
+read -r SSHP
+if [ -n "$SSHP" ]; then
+    if [[ "$SSHP" =~ ^[0-9]+$ ]] && [ "$SSHP" -ge 1 ] && [ "$SSHP" -le 65535 ]; then
+        /usr/local/bin/gateway-ssh-port.sh set "$SSHP" >/dev/null 2>&1 && SUGGESTED="$SSHP"
+    else
+        echo -e "  ${YEL}Not a valid port, keeping $SUGGESTED.${NC}"
+    fi
+fi
+echo -e "  SSH will listen on ${BOLD}${SUGGESTED}${NC} (changeable later in the panel)"
+
 echo ""
 echo -e "  ${RED}${BOLD}WARNING: ALL DATA on $TARGET will be ERASED!${NC}"
 printf "  Type 'yes' to confirm install to %s: " "$TARGET"

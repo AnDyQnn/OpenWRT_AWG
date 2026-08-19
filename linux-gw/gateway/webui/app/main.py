@@ -365,7 +365,11 @@ def change_password(req: CredsChange, request: Request):
 
 
 # ── SSH-доступ: смена порта онлайн (только админ, с подтверждением паролем) ──
-_SSHD_DROPIN = "/etc/ssh/sshd_config.d/10-gateway.conf"   # на ХОСТЕ
+# Порт SSH — СОСТОЯНИЕ машины. Отдельный drop-in, которого нет в репозитории:
+# 10-gateway.conf синкается накатом и затирал бы выбранный владельцем порт,
+# а сам порт при этом был бы опубликован в открытом коде.
+_SSHD_DROPIN = "/etc/ssh/sshd_config.d/20-gateway-port.conf"   # на ХОСТЕ
+_SSH_PORT_HELPER = "/usr/local/bin/gateway-ssh-port.sh"        # на ХОСТЕ
 _RESERVED_PORTS = {22, 53, 67, 68, 80, 443, 8000}          # 22 разрешим (см. ниже)
 
 
@@ -382,9 +386,15 @@ def _current_ssh_port() -> int:
                            f"grep -iE '^[[:space:]]*Port[[:space:]]' {_SSHD_DROPIN} 2>/dev/null | awk '{{print $2}}' | tail -1"],
                            capture_output=True, text=True, timeout=10)
         p = (r.stdout or "").strip()
-        return int(p) if p.isdigit() else 23232
+        if p.isdigit():
+            return int(p)
+        # файла ещё нет (первая загрузка/миграция) — спросим помощника на хосте
+        r = subprocess.run(_host_prefix() + [_SSH_PORT_HELPER, "get"],
+                           capture_output=True, text=True, timeout=10)
+        p = (r.stdout or "").strip()
+        return int(p) if p.isdigit() else 22
     except Exception:
-        return 23232
+        return 22
 
 
 class SshPortReq(BaseModel):
@@ -412,11 +422,14 @@ def ssh_port_set(req: SshPortReq, request: Request):
         return JSONResponse({"ok": False, "error": f"Порт {p} занят сервисом шлюза, выберите другой"}, status_code=400)
     # переписываем строку Port в host-дропине и перезапускаем sshd.
     # Существующие SSH-сессии при рестарте НЕ рвутся; новый порт — для новых входов.
-    cmd = (f"sed -i '/^[[:space:]]*Port[[:space:]]/d' {_SSHD_DROPIN}; "
-           f"echo 'Port {p}' >> {_SSHD_DROPIN}; "
-           f"(sshd -t 2>/dev/null && systemctl restart ssh 2>/dev/null) || systemctl restart ssh 2>/dev/null")
+    # Пишем через хостовый помощник: он и файл сформирует, и sshd -t проверит,
+    # и перечитает конфиг. Существующие сессии при этом не рвутся.
     try:
-        subprocess.run(_host_prefix() + ["sh", "-c", cmd], capture_output=True, timeout=20)
+        r = subprocess.run(_host_prefix() + [_SSH_PORT_HELPER, "set", str(p)],
+                           capture_output=True, text=True, timeout=25)
+        if r.returncode != 0:
+            return JSONResponse({"ok": False,
+                                 "error": "sshd отверг конфигурацию, порт не изменён"}, status_code=500)
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
     _wlog(f"WARN SSH-порт изменён на {p} (user={_token_user(request)})")

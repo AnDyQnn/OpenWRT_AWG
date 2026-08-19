@@ -431,7 +431,7 @@
                 заходить только из локальной сети или через VPN-туннель. Нестандартный порт уменьшает шум от ботов.</p>
                 <div class="grp-create" style="align-items:center">
                     <span class="small">Текущий порт:&nbsp;<b id="ssh-port-cur">—</b></span>
-                    <input id="ssh-port-new" class="access-input" type="number" min="1" max="65535" placeholder="новый порт (напр. 23232)" style="flex:0 0 220px">
+                    <input id="ssh-port-new" class="access-input" type="number" min="1" max="65535" placeholder="новый порт" style="flex:0 0 220px">
                     <button class="success" onclick="sshPortChange()"><span data-ic="save"></span> Изменить порт</button>
                 </div>
                 <div id="ssh-port-result" class="small" style="margin-top:0.4rem"></div>
@@ -459,7 +459,7 @@
                 </div>
                 <p class="small" style="margin-top:.4rem">Проще всего — <b>сгенерировать ключ прямо здесь</b>: сервер создаст пару,
                 публичную часть добавит сам, а <b>приватный файл скачается тебе</b> (на сервере он не хранится). Сохрани файл —
-                им и заходишь: <code>ssh -i файл -p 23232 root@192.168.88.1</code>.</p>
+                им и заходишь: <code>ssh -i файл -p <b id="ssh-port-inline">…</b> root@192.168.88.1</code>.</p>
                 <p class="small" style="margin-top:.5rem; opacity:.8">Либо вставь готовый публичный ключ (со своего компа,
                 <code>ssh-keygen -t ed25519</code> → <code>~/.ssh/id_ed25519.pub</code>):</p>
                 <div class="grp-create">

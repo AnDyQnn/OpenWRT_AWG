@@ -57,5 +57,5 @@ Get-ChildItem $OutputDir -Filter "*.img.gz" | ForEach-Object {
 Write-Host ""
 Write-Host "Rufus  : write gateway.img.gz to USB (DD mode)"
 Write-Host "Panel  : https://192.168.88.1  (admin/admin)"
-Write-Host "SSH    : ssh -p 23232 root@192.168.88.1  (root)  - LAN/VPN only, closed on WAN"
+Write-Host "SSH    : port is chosen at install (random by default), shown on the gateway screen  - LAN/VPN only, closed on WAN"
 Write-Host "First boot is fast - container images are pre-baked."

@@ -368,9 +368,13 @@ async function secUnbanAll() {
 }
 
 // ── SSH-порт (только админ, смена с подтверждением паролем) ──
+let _sshPort = 22;   // реальный порт установки; в коде не хардкодим
 async function loadSshPort() {
     const d = await api('/api/security/ssh-port');
-    if (d && $('ssh-port-cur')) $('ssh-port-cur').textContent = d.port || '—';
+    if (!d) return;
+    _sshPort = d.port || 22;
+    if ($('ssh-port-cur'))    $('ssh-port-cur').textContent = _sshPort;
+    if ($('ssh-port-inline')) $('ssh-port-inline').textContent = _sshPort;
 }
 async function sshPortChange() {
     const p = parseInt(($('ssh-port-new').value || '').trim(), 10);
@@ -436,7 +440,7 @@ async function sshKeyGen() {
     a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1500);
     toast('Ключ создан, приватный файл скачан. Сохрани его — повторно не покажем!', 'ok', 9000);
     const res = $('ssh-key-result');
-    if (res) res.textContent = 'Готово: приватный ключ скачан (gateway_id_ed25519). Заходи: ssh -i gateway_id_ed25519 -p 23232 root@192.168.88.1';
+    if (res) res.textContent = `Готово: приватный ключ скачан (gateway_id_ed25519). Заходи: ssh -i gateway_id_ed25519 -p ${_sshPort} root@192.168.88.1`;
     loadSshKeys();
 }
 

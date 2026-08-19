@@ -22,7 +22,8 @@ G=$'\033[1;32m'; C=$'\033[0;36m'; B=$'\033[1m'; N=$'\033[0m'
   echo "${G}${B}   ✓  GATEWAY ГОТОВ К РАБОТЕ  /  GATEWAY READY${N}"
   echo "${G}${B}  ============================================================${N}"
   echo "   Веб-панель : ${C}https://${LAN_IP}${N}   (admin / admin)"
-  echo "   SSH        : root@${LAN_IP}   (пароль: openwrt)"
+  SSH_PORT=$(/usr/local/bin/gateway-ssh-port.sh get 2>/dev/null || echo 22)
+  echo "   SSH        : ssh -p ${SSH_PORT} root@${LAN_IP}   (пароль: openwrt)"
   echo "   Статус     : gateway-status"
   [ -n "$WAN" ] && echo "   WAN-порт   : ${WAN}"
   echo "   Контейнеры : $(docker ps --format '{{.Names}}' 2>/dev/null | tr '\n' ' ')"
