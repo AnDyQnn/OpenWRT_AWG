@@ -1,0 +1,154 @@
+name: release-image
+
+# Сборка загрузочного .img и выпуск релиза.
+#
+# Отдельно от build-and-release.yml намеренно: тот отрабатывает за минуты на
+# каждый пуш в main и наполняет канал обновлений, а сборка образа занимает
+# получас и нужна только когда выпускаем прошивку. Держать их вместе значило бы
+# ждать полчаса ради правки одной строки.
+#
+# Образы контейнеров НЕ пересобираются — они скачиваются из GHCR по тегу версии.
+# Так прошивка гарантированно содержит ровно то, что раздаёт канал обновлений,
+# и не тратится ~15 минут на повторную компиляцию amneziawg-go.
+#
+# Запуск: вкладка Actions → release-image → Run workflow (версия берётся из
+# linux-gw/gateway/VERSION), либо пуш тега вида linux-gw-v2.11.0.
+
+on:
+  workflow_dispatch:
+    inputs:
+      prerelease:
+        description: "Пометить релиз как предварительный"
+        type: boolean
+        default: false
+  push:
+    tags: [ 'linux-gw-v*' ]
+
+jobs:
+  build-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write     # создать релиз и приложить файл
+      packages: read      # скачать образы из GHCR
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Освободить место на раннере
+        # Сырой .img ~4.5 ГБ + хост-образ ~2.2 ГБ + архив ~0.9 ГБ. Штатных ~14 ГБ
+        # впритык, поэтому сносим предустановленное, что нам заведомо не нужно.
+        run: |
+          echo "до очистки:"; df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /usr/local/share/boost /usr/share/swift "$AGENT_TOOLSDIRECTORY" || true
+          sudo apt-get clean
+          echo "после очистки:"; df -h / | tail -1
+
+      - name: Подготовка (версия, тег, namespace)
+        id: prep
+        run: |
+          set -e
+          VERSION=$(tr -d ' \t\r\n' < linux-gw/gateway/VERSION)
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="linux-gw-v$VERSION"
+          fi
+          NS=$(echo '${{ github.repository_owner }}/openwrt-awg' | tr '[:upper:]' '[:lower:]')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"         >> "$GITHUB_OUTPUT"
+          echo "NS=$NS"           >> "$GITHUB_ENV"
+          echo "Версия $VERSION, тег $TAG, namespace $NS"
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Забрать образы контейнеров из GHCR (не пересобираем)
+        run: |
+          set -e
+          V="${{ steps.prep.outputs.version }}"
+          for s in awg dnsmasq webui; do
+            echo "--- ghcr.io/$NS/$s:v$V"
+            docker pull -q "ghcr.io/$NS/$s:v$V"
+            docker tag  "ghcr.io/$NS/$s:v$V" "gateway-$s:latest"
+          done
+          docker images --format '  {{.Repository}}:{{.Tag}} {{.Size}}' | grep '^  gateway-'
+
+      - name: Запечь образы в images.tar
+        run: |
+          set -e
+          mkdir -p out
+          docker save -o out/images.tar gateway-awg:latest gateway-dnsmasq:latest gateway-webui:latest
+          echo "images.tar: $(du -h out/images.tar | cut -f1)"
+
+      - name: Собрать хост-образ
+        run: docker build -t gateway-linux:latest linux-gw
+
+      - name: Создать загрузочный .img
+        run: |
+          set -e
+          docker run --rm --privileged \
+            -v "$PWD/out:/output" -v "$PWD/out:/input" \
+            gateway-linux:latest
+          rm -f out/images.tar out/gateway.img
+          ls -lh out/
+
+      - name: Проверить, что внутри собралось то, что ждём
+        run: |
+          set -e
+          V="${{ steps.prep.outputs.version }}"
+          got=$(docker run --rm --entrypoint sh gateway-linux:latest -c 'cat /opt/gateway/VERSION')
+          [ "$got" = "$V" ] || { echo "версия в образе $got, а ожидали $V"; exit 1; }
+          docker run --rm --entrypoint sh gateway-linux:latest -c '
+            set -e
+            grep -q "^Port" /etc/ssh/sshd_config.d/10-gateway.conf && { echo "порт SSH захардкожен"; exit 1; }
+            [ -x /usr/local/bin/gateway-ssh-port.sh ] || { echo "нет помощника порта"; exit 1; }
+            [ -s /opt/gateway/host-requirements.list ] || { echo "нет списка требований"; exit 1; }
+            echo "  версия, порт, помощник и требования — на месте"
+          '
+          test -s out/gateway.img.gz || { echo "образ не создан"; exit 1; }
+          echo "  gateway.img.gz: $(du -h out/gateway.img.gz | cut -f1)"
+
+      - name: Выпустить релиз и приложить образ
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.prep.outputs.tag }}
+          VERSION: ${{ steps.prep.outputs.version }}
+        run: |
+          set -e
+          SIZE=$(du -m out/gateway.img.gz | cut -f1)
+          NOTES=$(mktemp)
+          cat > "$NOTES" <<EOF
+          Готовый загрузочный образ шлюза — записать на флешку (Rufus, режим DD) и загрузиться.
+
+          | | |
+          |---|---|
+          | Панель | \`https://192.168.88.1\` — \`admin\` / \`admin\` |
+          | SSH | порт задаётся при установке, виден на экране шлюза |
+          | Статус на экране | \`gateway-status\` |
+
+          Контейнеры запечены в образ — первый запуск быстрый, без сборки и без интернета.
+          Пароли смените в панели: **Система → Безопасность**.
+
+          Дальше версии приезжают по каналу обновлений: панель напомнит о новой,
+          накат — кнопкой в разделе «Обновление» (режим по умолчанию — только вручную).
+
+          Размер образа: ${SIZE} МБ.
+          EOF
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "релиз $TAG уже есть — обновляю файл"
+            gh release upload "$TAG" out/gateway.img.gz --clobber
+          else
+            gh release create "$TAG" out/gateway.img.gz \
+              --title "Gateway Linux v$VERSION" \
+              --notes-file "$NOTES" \
+              ${{ inputs.prerelease && '--prerelease' || '' }}
+          fi
+          gh release view "$TAG" --json tagName,assets \
+            --jq '"выпущено: \(.tagName), файлов: \(.assets|length)"'
