@@ -1,0 +1,16 @@
+[Unit]
+Description=Fair per-device bandwidth sharing (CAKE/HTB), follows panel settings
+After=wan-detect.service gateway-compose.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/gw-qos.sh daemon
+# При остановке снимаем шейпинг: выключенный сервис не должен оставлять
+# ограничения, о которых никто не помнит.
+ExecStopPost=/usr/local/bin/gw-qos.sh clear
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

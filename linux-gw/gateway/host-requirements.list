@@ -100,6 +100,7 @@ unit wan-detect.service
 unit gateway-compose.service
 unit gateway-ready.service
 unit client-traffic.service
+unit gw-qos.service
 unit auto-timezone.service
 unit gateway-update-guard.service
 

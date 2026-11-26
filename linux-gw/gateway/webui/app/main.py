@@ -1624,6 +1624,118 @@ def update_config_set(req: UpdateConfigReq, request: Request):
     return {"ok": True, "config": cfg}
 
 
+# ── Распределение скорости между устройствами (QoS) ──────────────────────────
+# Движок — host-скрипт gw-qos.sh (CAKE/HTB), демон gw-qos.service сам подхватывает
+# изменения qos.env за ~10 с; панель дополнительно дёргает apply, чтобы не ждать.
+# qos.env — плоский KEY=число (shell не парсит JSON), значения = ставки шейпера
+# в Мбит/с, 0 = направление не ограничивать.
+_QOS_CFG = Path("/etc/awg-setup/qos.env")
+_QOS_STATUS = Path("/run/awg-setup/qos-status.json")
+_QOS_MEASURE = Path("/run/awg-setup/qos-measure.json")
+_QOS_KEYS = ("ENABLED", "VPN_DOWN", "VPN_UP", "WAN_DOWN", "WAN_UP")
+_QOS_MAX_MBIT = 100000
+
+
+def _read_qos() -> dict:
+    cfg = {k: 0 for k in _QOS_KEYS}
+    try:
+        for line in _QOS_CFG.read_text().splitlines():
+            m = re.match(r"^([A-Z_]+)=(\d+)\s*$", line.strip())
+            if m and m.group(1) in cfg:
+                cfg[m.group(1)] = int(m.group(2))
+    except Exception:
+        pass
+    return {"enabled": cfg["ENABLED"] == 1, "vpn_down": cfg["VPN_DOWN"], "vpn_up": cfg["VPN_UP"],
+            "wan_down": cfg["WAN_DOWN"], "wan_up": cfg["WAN_UP"]}
+
+
+def _read_json(p: Path) -> dict:
+    try:
+        return json.loads(p.read_text())
+    except Exception:
+        return {}
+
+
+class QosReq(BaseModel):
+    enabled: bool = False
+    vpn_down: int = 0
+    vpn_up: int = 0
+    wan_down: int = 0
+    wan_up: int = 0
+
+
+@app.get("/api/qos")
+def qos_get(request: Request):
+    if not _is_admin(request):
+        return JSONResponse({"error": "Доступно только администратору"}, status_code=403)
+    meas = _read_json(_QOS_MEASURE)
+    if meas.get("state") == "running" and not Path("/run/awg-setup/qos-measuring").exists():
+        # Процесс замера умер, не дописав итог (ребут, kill). Даём ему 30 с на
+        # старт (маркер создаётся не мгновенно), потом показываем как прерванный.
+        try:
+            stale = time.time() - _QOS_MEASURE.stat().st_mtime > 30
+        except Exception:
+            stale = True
+        if stale:
+            meas = {**meas, "state": "error", "step": "замер прерван — запусти ещё раз"}
+    return {"config": _read_qos(), "status": _read_json(_QOS_STATUS), "measure": meas}
+
+
+@app.post("/api/qos")
+def qos_set(req: QosReq, request: Request):
+    if not _is_admin(request):
+        return JSONResponse({"error": "Доступно только администратору"}, status_code=403)
+    vals = {"VPN_DOWN": req.vpn_down, "VPN_UP": req.vpn_up,
+            "WAN_DOWN": req.wan_down, "WAN_UP": req.wan_up}
+    for k, v in vals.items():
+        if not isinstance(v, int) or v < 0 or v > _QOS_MAX_MBIT:
+            return JSONResponse({"ok": False, "error": f"Скорость должна быть от 0 до {_QOS_MAX_MBIT} Мбит/с"},
+                                status_code=400)
+    if req.enabled and not (req.vpn_down or req.wan_down or req.vpn_up or req.wan_up):
+        return JSONResponse({"ok": False, "error": "Укажи скорость канала или нажми «Измерить»"},
+                            status_code=400)
+    body = f"ENABLED={1 if req.enabled else 0}\n" + "".join(f"{k}={v}\n" for k, v in vals.items())
+    try:
+        tmp = _QOS_CFG.with_suffix(".env.tmp")
+        tmp.write_text(body)
+        tmp.replace(_QOS_CFG)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+    try:
+        subprocess.Popen(_host_prefix() + ["gw-qos.sh", "apply"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass  # демон gw-qos.service всё равно применит за ~10 с
+    _wlog(f"INFO Распределение скорости: {'вкл' if req.enabled else 'выкл'} "
+          f"(VPN ↓{req.vpn_down} ↑{req.vpn_up}, напрямую ↓{req.wan_down} ↑{req.wan_up} Мбит/с) "
+          f"(user={_token_user(request)})")
+    return {"ok": True, "config": _read_qos()}
+
+
+class QosMeasureReq(BaseModel):
+    enable: bool = False
+
+
+@app.post("/api/qos/measure")
+def qos_measure(req: QosMeasureReq, request: Request):
+    if not _is_admin(request):
+        return JSONResponse({"error": "Доступно только администратору"}, status_code=403)
+    if _read_json(_QOS_MEASURE).get("state") == "running" and Path("/run/awg-setup/qos-measuring").exists():
+        return JSONResponse({"ok": False, "error": "Замер уже идёт"}, status_code=409)
+    argv = ["gw-qos.sh", "measure"] + (["--enable"] if req.enable else [])
+    try:
+        # ~1 минута — отвязанно от контейнера панели, как остальные долгие операции
+        subprocess.Popen(_host_detached(argv), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+    try:
+        _QOS_MEASURE.write_text(json.dumps({"state": "running", "step": "запуск"}, ensure_ascii=False))
+    except Exception:
+        pass
+    _wlog(f"INFO Замер скорости канала запущен (user={_token_user(request)})")
+    return {"ok": True}
+
+
 # ══ Кастомный МЭ: доступ к ресурсам + раздельное туннелирование ══════
 # ДВЕ РАЗНЫЕ СУЩНОСТИ:
 #  1) Раздельное туннелирование (настройка VPN) — список `direct`: домены идут

@@ -119,6 +119,16 @@ else
     _warn "dns:resolve" "br-lan без IP — DNS-проверка пропущена"
 fi
 
+# --- SOFT: распределение скорости (QoS) применено, если включено ------------
+# SOFT: без шейпинга сеть работает (просто без честного деления полосы).
+if grep -q '^ENABLED=1' /etc/awg-setup/qos.env 2>/dev/null; then
+    if grep -q '"active":true' /run/awg-setup/qos-status.json 2>/dev/null; then
+        _ok "qos:active"
+    else
+        _warn "qos:active" "включено, но не применено ($(sed -n 's/.*"note":"\([^"]*\)".*/\1/p' /run/awg-setup/qos-status.json 2>/dev/null))"
+    fi
+fi
+
 # --- SOFT: объявленные host-пакеты установлены ------------------------------
 # Накат ставит недостающие сам (_sync_host_requirements), но если зеркало было
 # недоступно — он не откатывается, а оставляет недостачу. Показываем её здесь,

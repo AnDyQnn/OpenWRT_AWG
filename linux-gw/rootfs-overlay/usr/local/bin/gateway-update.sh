@@ -387,6 +387,10 @@ do_apply(){
         systemctl restart fail2ban >/dev/null 2>&1 || true
     fi
     [ -x /usr/local/bin/gw-firewall.sh ] && /usr/local/bin/gw-firewall.sh >/dev/null 2>&1 || true
+    # Сервисы, добавленные/изменённые накатом: _sync_host_requirements их только
+    # включает (запускать весь список нельзя — там установщик). Перезапускаем
+    # поимённо, иначе новый код заработал бы лишь после ребута.
+    systemctl restart gw-qos.service >/dev/null 2>&1 || true
 
     # Подчищаем осиротевшие переименованные контейнеры (<hex>_gw-*). Docker так
     # переименовывает контейнер, который не смог удалить при пересоздании — это

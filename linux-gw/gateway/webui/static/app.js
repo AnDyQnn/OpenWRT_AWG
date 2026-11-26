@@ -194,6 +194,61 @@ async function loadNetwork() {
     } else { $('kpi-lan').textContent = '—'; }
 }
 
+// ── Распределение скорости (QoS) ──
+// Поля формы заполняем только при первой загрузке и после замера/сохранения —
+// иначе 5-секундный refresh затирал бы то, что пользователь сейчас вводит.
+let _qosFilled = false, _qosPoll = null;
+function _qosFill(c) {
+    $('qos-vd').value = c.vpn_down || ''; $('qos-vu').value = c.vpn_up || '';
+    $('qos-wd').value = c.wan_down || ''; $('qos-wu').value = c.wan_up || '';
+    $('qos-en').checked = !!c.enabled; _qosFilled = true;
+}
+async function loadQos(force = false) {
+    if (!$('qos-card')) return;
+    const d = await api('/api/qos');
+    if (!d || d.error) { $('qos-card').style.display = 'none'; return; }
+    $('qos-card').style.display = '';
+    const c = d.config || {}, s = d.status || {}, m = d.measure || {};
+    if (!_qosFilled || force) _qosFill(c);
+    let dot = 'off', txt = 'выключено';
+    if (c.enabled && s.active) { dot = 'on'; txt = 'включено'; }
+    else if (c.enabled) { dot = 'warn'; txt = 'включено, применяется…'; }
+    if (s.note && c.enabled) txt += ' · ' + s.note;
+    $('qos-dot').className = 'dot ' + dot; $('qos-state').textContent = txt;
+    const el = $('qos-measure');
+    const mb = v => (v ? v + ' Мбит/с' : '—');
+    if (m.state === 'running') {
+        el.innerHTML = `<span style="color:var(--warn)">Идёт замер: ${_esc(m.step || '')}…</span>`;
+        if (!_qosPoll) _qosPoll = setInterval(() => loadQos(), 2000);
+    } else {
+        if (_qosPoll) { clearInterval(_qosPoll); _qosPoll = null; _qosFill(c); }
+        if (m.state === 'done')
+            el.innerHTML = `Последний замер (${_esc(m.at || '')}): через VPN ↓ ${mb(m.vpn_down)} ↑ ${mb(m.vpn_up)} · напрямую ↓ ${mb(m.wan_down)} ↑ ${mb(m.wan_up)}`;
+        else if (m.state === 'error')
+            el.innerHTML = `<span style="color:var(--bad)">Замер не удался: ${_esc(m.step || '')}</span>`;
+        else el.textContent = '';
+    }
+}
+async function qosMeasure(enable) {
+    const msg = enable
+        ? 'Измерить скорость канала и включить распределение? Около минуты канал будет занят замером.'
+        : 'Измерить скорость канала? Около минуты канал будет занят замером. Настройки не изменятся.';
+    if (!await uiConfirm(msg, 'Измерить')) return;
+    const r = await fetch('/api/qos/measure', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ enable }) });
+    const d = await r.json();
+    if (d.ok) { toast('Замер запущен…', 'warn', 4000); loadQos(); }
+    else toast(d.error || 'ошибка', 'bad');
+}
+async function qosSave() {
+    const n = id => Math.max(0, parseInt($(id).value || '0', 10) || 0);
+    const body = { enabled: $('qos-en').checked, vpn_down: n('qos-vd'), vpn_up: n('qos-vu'),
+                   wan_down: n('qos-wd'), wan_up: n('qos-wu') };
+    const r = await fetch('/api/qos', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const d = await r.json();
+    if (d.ok) { toast(body.enabled ? 'Распределение скорости включено' : 'Распределение скорости выключено', 'ok'); _qosFill(d.config); setTimeout(loadQos, 1500); }
+    else toast(d.error || 'ошибка', 'bad');
+}
+
 // ── VPN ──
 async function loadVpn() {
     const d = await api('/api/vpn'); if (!d) return;
@@ -1318,7 +1373,8 @@ async function loadReport() {
 
 // ── Цикл обновления ──
 function refresh() { loadSystem(); loadNetwork(); loadVpn(); loadDevices(); }
-refresh(); loadLogs(); loadWhoami(); loadAccess(); loadReport();
+refresh(); loadLogs(); loadWhoami(); loadAccess(); loadReport(); loadQos();
+setInterval(() => { if (!_qosPoll) loadQos(); }, 15000);
 setInterval(refresh, 5000);
 setInterval(loadLogs, 15000);
 setInterval(loadReport, 300000);

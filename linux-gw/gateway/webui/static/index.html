@@ -145,6 +145,38 @@
             <div id="dev-empty" class="small">Нет подключённых устройств</div>
         </div>
 
+        <div class="card" id="qos-card">
+            <h3><span data-ic="gauge"></span>Распределение скорости <span id="qos-dot" class="dot off"></span>
+                <span id="qos-state" class="small"></span></h3>
+            <p class="small">Делит интернет между устройствами <b>поровну и только когда нужно</b>: одно устройство
+            получает канал целиком, а когда качают несколько — никто (телевизор, загрузка обновлений) не забирает всё
+            себе. Сеть внутри офиса (компьютер ↔ компьютер) не ограничивается — шлюз остаётся обычным коммутатором.</p>
+            <div class="btns" style="margin-top:0.4rem">
+                <button class="success" onclick="qosMeasure(true)"><span data-ic="gauge"></span> Измерить и включить</button>
+                <button onclick="qosMeasure(false)"><span data-ic="refresh"></span> Только измерить</button>
+            </div>
+            <div id="qos-measure" class="small" style="margin-top:0.5rem"></div>
+            <div class="grp-create" style="flex-wrap:wrap; margin-top:0.6rem">
+                <label class="small" style="flex:1 1 220px">Через VPN, Мбит/с
+                    <span style="display:flex; gap:.4rem">
+                        <input type="number" id="qos-vd" class="access-input" min="0" max="100000" placeholder="↓ загрузка" title="Загрузка через VPN, Мбит/с (0 — не ограничивать)">
+                        <input type="number" id="qos-vu" class="access-input" min="0" max="100000" placeholder="↑ отдача" title="Отдача через VPN, Мбит/с (0 — не ограничивать)">
+                    </span></label>
+                <label class="small" style="flex:1 1 220px">Напрямую (провайдер), Мбит/с
+                    <span style="display:flex; gap:.4rem">
+                        <input type="number" id="qos-wd" class="access-input" min="0" max="100000" placeholder="↓ загрузка" title="Загрузка напрямую, Мбит/с (0 — не ограничивать)">
+                        <input type="number" id="qos-wu" class="access-input" min="0" max="100000" placeholder="↑ отдача" title="Отдача напрямую, Мбит/с (0 — не ограничивать)">
+                    </span></label>
+            </div>
+            <div class="btns" style="margin-top:0.6rem; align-items:center">
+                <label class="small" style="display:flex; align-items:center; gap:.4rem"><input type="checkbox" id="qos-en"> Включено</label>
+                <button onclick="qosSave()">Сохранить</button>
+            </div>
+            <p class="small" style="margin-top:0.4rem"><span data-ic="warn"></span> Замер занимает около минуты и на это
+            время загружает канал — запускай, когда никто ничего не качает. Шлюз выставит ~90% от измеренного: чтобы
+            делить канал честно, шлюз должен быть чуть «уже» провайдера. Цифры можно поправить вручную; 0 — не ограничивать.</p>
+        </div>
+
         <div class="card">
             <h3><span data-ic="save"></span>DHCP — резервирование адресов и имена</h3>
             <p class="small">Список собирается <b>сам</b> по всем устройствам в сети — ты только редактируешь.
@@ -580,6 +612,10 @@
                     <p>Вкладка <b>«Сеть»</b> показывает всех, кто получил адрес по DHCP: IP, MAC, имя и до какого времени аренда.</p>
                     <p>Колонка <b>«Скорость (сейчас)»</b> — живой поток по каждому устройству (<span style="color:var(--good)">↓</span> скачивание, <span style="color:var(--accent)">↑</span> отдача). Сразу видно, кто грузит канал или у кого просадка.</p>
                     <p class="small">Если у устройства <b>0</b> — оно просто сейчас ничего не передаёт (простой). Как пойдёт трафик — появятся реальные цифры.</p>
+                    <p><b>Одно устройство «съедает» весь интернет?</b> Включи <b>«Распределение скорости»</b> на вкладке «Сеть» —
+                    кнопка «Измерить и включить». Тогда канал делится между устройствами поровну, но только когда качают
+                    одновременно: в одиночку любое устройство получает всю скорость. Обмен между компьютерами внутри
+                    сети не ограничивается.</p>
                 </div>
 
                 <div class="help-block" id="help-access">
