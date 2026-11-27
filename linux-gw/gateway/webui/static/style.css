@@ -923,3 +923,8 @@ tr.nl-det > td { max-width: 0; overflow: hidden; }
 .nl-prow:hover .nl-more-btn { background: rgba(88,166,255,0.2); border-color: var(--accent); }
 .nl-more-btn.on { color: var(--muted); border-color: var(--border); background: transparent; }
 .nl-prow:hover td { background: rgba(88,166,255,0.05); }
+.nl-ports-hint svg { width: 15px; height: 15px; vertical-align: -3px; color: var(--accent); margin-right: 0.2rem; }
+.nl-more-btn { display: inline-flex; align-items: center; gap: 0.3rem; }
+.nl-more-btn svg { width: 14px; height: 14px; }
+.nl-chev svg { width: 13px; height: 13px; vertical-align: -2px; }
+.nl-hint-ic { color: var(--accent); }

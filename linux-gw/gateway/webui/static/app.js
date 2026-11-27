@@ -1256,7 +1256,7 @@ function _nlRender() {
         <div class="nl-main"></div></div>`;
 
     // ── порты: сводная таблица (всё временное — на общем графике выше) ──
-    h += `<div class="nl-ports-hint">📊 Нажмите на порт — откроется <b>подробная инфографика</b>: график только этого порта,
+    h += `<div class="nl-ports-hint"><span class="nl-hint-ic">${GWFX.ic('chart')}</span> Нажмите на порт — откроется <b>подробная инфографика</b>: график только этого порта,
         ошибки кабеля (CRC, смены линка), скорость и трафик за период, последние события.</div>
         <div class="nl-ports"><table><thead><tr><th>Порт</th><th>Сейчас</th><th>Отвалов</th><th>Без линка</th>
         <th>На пониженной скорости</th><th>Проблемные периоды</th><th></th></tr></thead><tbody>` +
@@ -1265,14 +1265,14 @@ function _nlRender() {
             const now = f.role === 'VPN' ? (f.up ? 'поднят' : 'не поднят') : f.up ? (f.speed ? `${f.speed} Мбит/с` : 'линк есть') : 'нет линка';
             const open = _nlOpen.has(f.name);
             return `<tr class="nl-prow${open ? ' open' : ''}" onclick="_nlPortToggle('${_esc(f.name)}')" title="Подробно по порту">
-                <td><span class="nl-chev">${open ? '▾' : '▸'}</span><span class="dot ${st}"></span> <b>${_esc(f.name)}</b> <span class="nl-role nl-role-${(f.role || 'x').toLowerCase()}">${_esc(_nlRoleTxt(f.role))}</span>
+                <td><span class="nl-chev">${GWFX.ic(open ? 'chevd' : 'chevr')}</span><span class="dot ${st}"></span> <b>${_esc(f.name)}</b> <span class="nl-role nl-role-${(f.role || 'x').toLowerCase()}">${_esc(_nlRoleTxt(f.role))}</span>
                     <div class="small">${_esc(_NL_ROLE[f.role] || '')}</div></td>
                 <td class="nl-num ${st === 'ok' ? '' : 'c-' + st}">${_esc(now)}</td>
                 <td class="nl-num ${f.drops ? 'c-bad' : 'c-ok'}"><b>${f.drops}</b>${f.drops ? `<div class="small">до 5 с: ${f.drops_short}</div>` : ''}</td>
                 <td class="nl-num">${f.down_s ? _nlDur(f.down_s) : '—'}</td>
                 <td class="nl-num ${f.slow_s ? 'c-warn' : ''}">${f.slow_s ? `<b>${_nlDur(f.slow_s)}</b><div class="small">${f.slow_events} раз</div>` : '—'}</td>
                 <td>${_nlPeriods(f, t0) || '<span class="small c-ok">нет</span>'}</td>
-                <td class="nl-more-cell"><span class="nl-more-btn${open ? ' on' : ''}">${open ? 'Свернуть ▴' : '📊 Подробнее ▾'}</span></td></tr>` +
+                <td class="nl-more-cell"><span class="nl-more-btn${open ? ' on' : ''}">${open ? `Свернуть ${GWFX.ic('chevu')}` : `${GWFX.ic('chart')} Подробнее ${GWFX.ic('chevd')}`}</span></td></tr>` +
                 (open ? `<tr class="nl-det"><td colspan="7">${_nlPortDetail(f, d, per)}</td></tr>` : '');
         }).join('') + `</tbody></table></div>`;
 
