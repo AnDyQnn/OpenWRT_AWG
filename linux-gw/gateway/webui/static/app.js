@@ -1276,7 +1276,7 @@ function _nlRender() {
     if (met) met.ifaces.forEach(m => ['dn', 'up'].forEach(dir => serDefs.push({ key: `${m.name}:${dir}`, m, dir })));
     const bl = d.metrics && d.metrics.baseline;
     h += `<div class="nl-main-wrap">
-        <div class="nl-main-head"><div class="nl-btitle">Скорость интернета по портам, Мбит/с <span class="small">(средняя за ${_nlBucketName(met)})</span></div>
+        <div class="nl-main-head"><div class="nl-btitle">Скорость интернета по портам <span class="small">(средняя за ${_nlBucketName(met)})</span></div>
         <div class="nl-series">${serDefs.map(q => `<button class="nl-sc${_nlSerOn(q) ? ' on' : ''}" onclick="_nlToggle('${_esc(q.key)}')" title="Показать/скрыть">
             <i style="background:${_nlColor(q.m)}"></i>${_esc(q.m.name)} <span>${_esc(_nlRoleTxt(q.m.role))} ${q.dir === 'dn' ? '↓' : '↑'}</span></button>`).join('')}
         <span class="nl-sc-band"><i class="a-slow"></i>WAN на пониженной скорости</span>
@@ -1365,21 +1365,22 @@ function _nlRender() {
     // «круглые» метки времени (полночь, 00/04/08 ч, 1-е число) — общие для полосы и столбиков
     const L = 28;   // слева — место под шкалу Y столбиков; полоса сдвинута так же, чтобы оси совпадали
     const Hh = 3600e3, Dd = 24 * Hh;
-    const ticks = W => {
+    const ticks = (W, A = t0, B = t1) => {
+        const SP = Math.max(1, B - A), M = 60e3;
         const maxN = Math.max(2, Math.floor((W - L) / 78));
-        const steps = [Hh, 2 * Hh, 3 * Hh, 4 * Hh, 6 * Hh, 12 * Hh, Dd, 2 * Dd, 7 * Dd, 14 * Dd, 30 * Dd, 61 * Dd, 91 * Dd];
-        const st = steps.find(x => span / x <= maxN) || steps[steps.length - 1];
+        const steps = [10 * M, 15 * M, 30 * M, Hh, 2 * Hh, 3 * Hh, 4 * Hh, 6 * Hh, 12 * Hh, Dd, 2 * Dd, 7 * Dd, 14 * Dd, 30 * Dd, 61 * Dd, 91 * Dd];
+        const st = steps.find(x => SP / x <= maxN) || steps[steps.length - 1];
         const out = [];
         if (st >= 30 * Dd) {
             const months = Math.round(st / (30 * Dd));
-            const q = new Date(t0); q.setDate(1); q.setHours(0, 0, 0, 0); q.setMonth(q.getMonth() + 1);
-            while (q.getTime() <= t1 && out.length < 40) { out.push([q.getTime(), st]); q.setMonth(q.getMonth() + months); }
+            const q = new Date(A); q.setDate(1); q.setHours(0, 0, 0, 0); q.setMonth(q.getMonth() + 1);
+            while (q.getTime() <= B && out.length < 40) { out.push([q.getTime(), st]); q.setMonth(q.getMonth() + months); }
         } else {
-            const m = new Date(t0); m.setHours(0, 0, 0, 0);
+            const m = new Date(A); m.setHours(0, 0, 0, 0);
             let t = m.getTime();
             const inc = st < Dd ? st : Dd;
-            while (t < t0) t += inc;
-            for (; t <= t1 && out.length < 80; t += st) out.push([t, st]);
+            while (t < A) t += inc;
+            for (; t <= B && out.length < 80; t += st) out.push([t, st]);
         }
         return out;
     };
@@ -1389,7 +1390,7 @@ function _nlRender() {
         if (st >= 30 * Dd) return _NL_MON[dd.getMonth()];
         return _nlDate(t);
     };
-    const axisSvg = (W, X, yTop, yBot, yTxt, minX = 0) => ticks(W).map(([t, st]) => {
+    const axisSvg = (W, X, yTop, yBot, yTxt, minX = 0, A = t0, B = t1) => ticks(W, A, B).map(([t, st]) => {
         const x = Math.round(X(t)) + 0.5;
         if (x < minX) return '';
         const bold = st < Dd && new Date(t).getHours() === 0;
@@ -1465,8 +1466,13 @@ function _nlRender() {
         // иначе SVG растягивает ячейку и таблица уезжает в горизонтальный скролл
         const host = only && mainEl.closest('.nl-ports');
         const LM = 34, W = Math.max(280, host ? host.clientWidth - 46 : mainEl.clientWidth), PW = W - LM - 6;
-        const ROW = 15, NROWS = 3, BTOP = 4 + ROW * NROWS, TOP = BTOP + 10, H = only ? 230 : 300, PH = H - 24;
-        const X = t => LM + (t - t0) / span * PW;
+        const ROW = 15, NROWS = 3, BTOP = 4 + ROW * NROWS, TOP = BTOP + 10, H = only ? 270 : 360, PH = H - 24;
+        // История скорости короче половины периода (сборщик недавно запущен) —
+        // ось времени начинаем с данных, иначе линия — полоска у правого края.
+        const covF = met && met.data_from ? met.data_from * 1000 : null;
+        const cropX = !!(covF && covF > t0 + span * 0.5 && covF < t1 - 5 * 60e3);
+        const T0 = cropX ? Math.max(t0, covF - (t1 - covF) * 0.03) : t0, SPANX = Math.max(1, t1 - T0);
+        const X = t => LM + (t - T0) / SPANX * PW;
         const wanF = d.ifaces.find(f => f.role === 'WAN');
         const vis = serDefs.filter(q => only ? q.m.name === only : _nlSerOn(q));
         const pts = q => q.m.t.map((t, k) => [t * 1000, q.m[q.dir][k], q.m[q.dir + '_pk'][k]]).filter(p => p[0] >= t0 - met.bucket_s * 1000);
@@ -1484,9 +1490,9 @@ function _nlRender() {
             const p98 = allV.length ? allV[Math.floor(0.98 * (allV.length - 1))] : 0;
             let mx = vmax <= p98 * 1.35 ? vmax : p98;      // нет выбросов — весь диапазон
             // замер интернетометра — в шкалу, только если не улетает далеко выше трафика
-            sts.forEach(x => { const v = dir === 'dn' ? x.down : x.up; if (v && v <= Math.max(mx, 0.05) * 1.6) mx = Math.max(mx, v); });
-            mx = Math.max(mx, 0.05);
-            const step = [0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find(x => mx * 1.12 / x <= 2) || 2000;
+            sts.forEach(x => { const v = dir === 'dn' ? x.down : x.up; if (v && v <= Math.max(mx, 0.005) * 1.6) mx = Math.max(mx, v); });
+            mx = Math.max(mx, 0.005);                       // от 5 Кбит/с — и ночной простой читаем
+            const step = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find(x => mx * 1.12 / x <= 2) || 2000;
             return { step, top: Math.ceil(mx * 1.12 / step) * step };
         };
         const SC = { up: scaleFor('up'), dn: scaleFor('dn') };
@@ -1494,7 +1500,8 @@ function _nlRender() {
         const Y = (v, dir = 'dn') => dir === 'up'
             ? MID - Math.min(v, SC.up.top) / SC.up.top * (MID - TOP)
             : MID + Math.min(v, SC.dn.top) / SC.dn.top * (PH - MID);
-        const fmtV = v => v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(0) : v >= 1 ? (+v.toFixed(1)).toString() : (+v.toFixed(2)).toString();
+        const fmtV = v => v >= 10 ? v.toFixed(0) : v >= 1 ? (+v.toFixed(1)).toString() : v > 0 ? Math.round(v * 1000) + ' К' : '0';
+        const fmtR = v => v >= 1 ? `${(+v.toFixed(1))} Мбит/с` : `${Math.round(v * 1000)} Кбит/с`;
 
         // ── внештатные события — полупрозрачные полосы ПОВЕРХ графика с подписью сверху ──
         const ann = [];
@@ -1503,7 +1510,7 @@ function _nlRender() {
         if (slowF) slowF.segments.filter(g => g.state === 'slow').forEach(g =>
             ann.push({ a: _nlT(g.from), b: _nlT(g.to), k: 'slow', label: `${_nlRoleTxt(slowF.role)} ${g.speed || ''} Мбит/с`, tip: `${slowF.name} на ${g.speed} Мбит/с вместо ${slowF.full_speed}` }));
         // отвалы: близкие склеиваем в одну полосу (иначе при «моргании» — частокол)
-        const near = span * 14 / PW;                 // ближе 14 px — одна полоса
+        const near = SPANX * 14 / PW;                // ближе 14 px — одна полоса
         d.ifaces.filter(f => !only || f.name === only).forEach(f => {
             const ev = f.events.filter(e => _nlIsDrop(e) && !(f.role === 'VPN' && (e.dur || 0) <= 3))
                 .map(e => ({ a: _nlT(e.ts), b: _nlT(e.ts) + (e.dur || 0) * 1000 })).sort((x, y) => x.a - y.a);
@@ -1558,9 +1565,10 @@ function _nlRender() {
         });
         sv += `<line x1="${LM}" y1="${MID + 0.5}" x2="${LM + PW}" y2="${MID + 0.5}" stroke="#484f58"/>
             <text x="${LM - 6}" y="${MID + 3.5}" fill="${_NL_C.axis}" font-size="10.5" text-anchor="end">0</text>
-            <text x="${LM + 6}" y="${TOP + 11}" fill="#c9d1d9" font-size="10.5" font-weight="600" opacity=".75">↑ отдача (из офиса)</text>
-            <text x="${LM + 6}" y="${PH - 5}" fill="#c9d1d9" font-size="10.5" font-weight="600" opacity=".75">↓ загрузка (в офис)</text>`;
-        sv += axisSvg(W, X, BTOP, PH, PH + 17, LM + 14);
+            <text x="${LM + 6}" y="${TOP + 11}" fill="#c9d1d9" font-size="10.5" font-weight="600" opacity=".75">↑ отдача (из офиса), ${SC.up.top < 1 ? 'Кбит/с' : 'Мбит/с'}</text>
+            <text x="${LM + 6}" y="${PH - 5}" fill="#c9d1d9" font-size="10.5" font-weight="600" opacity=".75">↓ загрузка (в офис), ${SC.dn.top < 1 ? 'Кбит/с' : 'Мбит/с'}</text>`;
+        sv += axisSvg(W, X, BTOP, PH, PH + 17, LM + 14, T0, t1);
+        if (cropX) sv += `<text x="${LM + PW - 4}" y="${TOP + 11}" fill="${_NL_C.axis}" font-size="10.5" text-anchor="end">скорость пишется с ${_nlFmt(covF)} — показано с этого момента</text>`;
         // серии скорости
         sv += `<g clip-path="url(#${U}c)">`;
         const gap = met ? met.bucket_s * 1000 * 2.5 : 0;
@@ -1578,7 +1586,7 @@ function _nlRender() {
         // полосы событий поверх графика
         ann.sort((x, y) => x.a - y.a);
         ann.forEach(o => {
-            const a = X(Math.max(o.a, t0)), b = X(Math.min(o.b, t1)); if (b < LM) return;
+            const a = X(Math.max(o.a, T0)), b = X(Math.min(o.b, t1)); if (b < LM) return;
             const w = Math.max(3, b - a), x = b - a < 3 ? (a + b) / 2 - 1.5 : a;
             o.x = x; o.w = w;
             sv += o.k === 'off'
@@ -1629,7 +1637,7 @@ function _nlRender() {
                 <text x="${o.x.toFixed(1)}" y="${(ty + 0.5).toFixed(1)}" fill="#e6edf3" font-size="10.5" font-weight="600" text-anchor="middle">${txt}</text></g>`;
         });
         const covFrom = met && met.data_from ? met.data_from * 1000 : null;
-        if (met && covFrom && (t1 - covFrom) < span * 0.15 && _nlDays > 1) {
+        if (met && covFrom && (t1 - covFrom) < span * 0.15 && _nlDays > 1 && !cropX) {
             const short = _nlDur((t1 - covFrom) / 1000);
             sv += `<rect x="${LM + PW / 2 - 260}" y="${(TOP + PH) / 2 - 26}" width="520" height="44" rx="8" fill="#161b22" stroke="#30363d"/>
                 <text x="${LM + PW / 2}" y="${(TOP + PH) / 2 - 8}" fill="#c9d1d9" font-size="12" text-anchor="middle">Скорость пишется с ${_nlFmt(covFrom)} — пока ${short} истории, на этом масштабе её не видно.</text>
@@ -1645,7 +1653,7 @@ function _nlRender() {
         svg.addEventListener('mousemove', ev => {
             const px = ev.clientX - svg.getBoundingClientRect().left;
             if (px < LM || px > LM + PW) return off();
-            const t = t0 + (px - LM) / PW * span, tol = 4 / PW * span;
+            const t = T0 + (px - LM) / PW * SPANX, tol = 4 / PW * SPANX;
             xh.setAttribute('x1', px); xh.setAttribute('x2', px); xh.setAttribute('visibility', 'visible');
             let html = `<b>${_nlFmt(t)}</b>`;
             if (met) {
@@ -1654,7 +1662,7 @@ function _nlRender() {
                     const p = pts(q).find(p => p[0] <= t && t < p[0] + bs), c = xps[n];
                     if (!p) { c.setAttribute('visibility', 'hidden'); return; }
                     c.setAttribute('cx', X(p[0] + bs / 2).toFixed(1)); c.setAttribute('cy', Y(p[1], q.dir).toFixed(1)); c.setAttribute('visibility', 'visible');
-                    html += `<div class="nl-tr"><i style="background:${_nlColor(q.m)}"></i>${_esc(q.m.name)} <span>${q.dir === 'dn' ? '↓' : '↑'} ср. / пик</span><b>${p[1]} / ${p[2]}</b></div>`;
+                    html += `<div class="nl-tr"><i style="background:${_nlColor(q.m)}"></i>${_esc(q.m.name)} <span>${q.dir === 'dn' ? '↓' : '↑'} ср. / пик</span><b>${fmtR(p[1])} / ${fmtR(p[2])}</b></div>`;
                 });
             }
             ann.filter(o => o.a - tol <= t && t <= o.b + tol).forEach(o => {

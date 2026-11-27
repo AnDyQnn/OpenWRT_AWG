@@ -189,7 +189,7 @@ def query(days, t_from=None, t_to=None):
                                 "link": [], "down_s": []})
         s["role"] = role
         for k, v in (("t", b), ("dn", dn), ("up", up), ("dn_pk", dpk), ("up_pk", upk), ("link", link), ("down_s", down_s)):
-            s[k].append(round(v, 2) if isinstance(v, float) else v)
+            s[k].append(round(v, 3) if isinstance(v, float) else v)   # 0.001 Мбит/с = 1 Кбит/с
     out["ifaces"] = sorted(by.values(), key=lambda s: ({"WAN": 0, "LAN": 1, "VPN": 2}.get(s["role"], 3), s["name"]))
     r = c.execute("SELECT min(ts) FROM m15").fetchone()
     out["data_from"] = r[0] if r else None
