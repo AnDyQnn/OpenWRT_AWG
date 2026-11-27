@@ -1,0 +1,21 @@
+[Unit]
+Description=Gateway installer (Y=install to disk / N=live from USB)
+ConditionPathExists=!/etc/awg-setup/.installed
+After=local-fs.target systemd-user-sessions.target
+# Запускаемся РАНЬШЕ growroot/swap (компактный образ) и раньше getty/docker,
+# забираем консоль себе и блокируем загрузку до ответа пользователя.
+Before=gateway-growroot.service gateway-swap.service gateway-compose.service docker.service getty@tty1.service console-getty.service serial-getty@ttyS0.service
+Conflicts=getty@tty1.service console-getty.service serial-getty@ttyS0.service
+
+[Service]
+Type=oneshot
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/console
+TTYReset=yes
+TTYVHangup=yes
+ExecStart=/usr/local/bin/gateway-installer.sh
+
+[Install]
+WantedBy=multi-user.target

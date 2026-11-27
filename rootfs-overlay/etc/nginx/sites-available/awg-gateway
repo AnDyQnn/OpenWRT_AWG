@@ -1,0 +1,23 @@
+server {
+    listen 80 default_server;
+    server_name _;
+
+    # Статика: веб-панель /awg/
+    location /awg/ {
+        alias /usr/share/awg/web/awg/;
+        index index.html;
+    }
+
+    # CGI скрипты
+    location /cgi-bin/ {
+        include fastcgi_params;
+        fastcgi_pass unix:/run/fcgiwrap.socket;
+        fastcgi_param SCRIPT_FILENAME /usr/share/awg/cgi-bin$fastcgi_script_name;
+        fastcgi_param SCRIPT_NAME     $fastcgi_script_name;
+    }
+
+    # Редирект корня на панель
+    location = / {
+        return 301 /awg/;
+    }
+}

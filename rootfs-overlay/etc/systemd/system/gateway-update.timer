@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodic gateway update tick (every 30 min: check + scheduled auto-apply)
+
+[Timer]
+# Первый тик через 10 мин после загрузки, далее каждые 30 мин. Сам tick решает,
+# обновлять ли (режим manual/nightly/scheduled из update-config.json).
+OnBootSec=10min
+OnUnitActiveSec=30min
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

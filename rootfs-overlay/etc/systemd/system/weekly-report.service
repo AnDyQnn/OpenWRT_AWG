@@ -1,0 +1,7 @@
+[Unit]
+Description=Weekly VPN report
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/weekly-report.sh
+ExecStartPost=/sbin/reboot

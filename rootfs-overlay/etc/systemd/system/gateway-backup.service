@@ -1,0 +1,11 @@
+[Unit]
+Description=Gateway state backup (daily snapshot of /etc/awg-setup, /etc/amnezia, leases)
+Wants=network-online.target
+After=gateway-compose.service
+
+[Service]
+Type=oneshot
+Environment=GW_KEEP_BACKUPS=3
+ExecStart=/usr/local/bin/gateway-backup.sh cron
+# Ретеншн: оставляем последние K бэкапов (крошечные, но чистим, чтоб не копились).
+ExecStartPost=/bin/sh -c 'cd /opt/gateway-backups 2>/dev/null && ls -1dt */ 2>/dev/null | tail -n +$(( ${GW_KEEP_BACKUPS:-3} + 1 )) | xargs -r rm -rf || true'

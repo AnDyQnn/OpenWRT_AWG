@@ -1,0 +1,12 @@
+[Unit]
+Description=WAN port auto-detection
+After=gateway-init.service network-pre.target
+Before=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/wan-detect.sh
+
+[Install]
+WantedBy=multi-user.target

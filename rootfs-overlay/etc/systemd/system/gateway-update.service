@@ -1,0 +1,8 @@
+[Unit]
+Description=Gateway update tick (check for updates + conditional auto-apply by config)
+Wants=network-online.target
+After=network-online.target gateway-compose.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/gateway-update-tick.sh

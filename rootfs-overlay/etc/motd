@@ -1,0 +1,10 @@
+
+  ============================================================
+   Gateway Linux  -  AmneziaWG VPN gateway
+  ============================================================
+   Web panel : https://192.168.88.1   (admin / admin)
+   Status    : gateway-status
+   Install   : gateway-install        (copy system to disk)
+   VPN debug : gateway-vpn-debug       (diagnose tunnel)
+  ============================================================
+

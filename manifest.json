@@ -1,0 +1,12 @@
+{
+  "version": "2.12.22",
+  "channel": "upd-code",
+  "released": "2026-11-27T23:10:53Z",
+  "images": {
+    "gateway-awg":     "ghcr.io/andyqnn/openwrt-awg/awg@sha256:af21c0dce2fdaa2bde31cdc08d1559d667072c5d8eb3b95b946290fe45a0240e",
+    "gateway-dnsmasq": "ghcr.io/andyqnn/openwrt-awg/dnsmasq@sha256:51189b5a1935c0d63c1a9c5b1398a18d228fd184ad6ef25d6eea705921e9425b",
+    "gateway-webui":   "ghcr.io/andyqnn/openwrt-awg/webui@sha256:26db5fa0e9329cb216beebdf07ef03cd2d82f09fa384e000d40e975cfa541848"
+  },
+  "min_from_version": "2.0.0",
+  "changelog": "График скорости: шкала по высоте плотно под трафик (2.12.22)"
+}

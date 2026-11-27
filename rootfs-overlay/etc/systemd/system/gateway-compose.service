@@ -1,0 +1,19 @@
+[Unit]
+Description=Gateway Docker services (awg + dnsmasq + webui)
+After=docker.service wan-detect.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/gateway
+# Грузим предсобранные образы (если вшиты в .img) — без компиляции и интернета.
+# Если их нет — fallback на сборку из исходников.
+ExecStartPre=/usr/local/bin/gateway-load-images.sh
+ExecStart=/usr/bin/docker compose up -d
+ExecStop=/usr/bin/docker compose down
+Restart=on-failure
+RestartSec=60
+
+[Install]
+WantedBy=multi-user.target

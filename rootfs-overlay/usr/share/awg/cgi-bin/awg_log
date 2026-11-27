@@ -1,0 +1,15 @@
+#!/bin/sh
+printf 'Content-Type: application/json\r\nCache-Control: no-cache\r\n\r\n'
+
+LOG="/var/log/awg-watchdog.log"
+[ -f "$LOG" ] || { printf '{"lines":[]}'; exit 0; }
+
+printf '{"lines":['
+tail -80 "$LOG" 2>/dev/null | awk '{
+    ts = $1 " " $2
+    msg = substr($0, length($1)+length($2)+3)
+    gsub(/\\/, "\\\\", msg); gsub(/"/, "\\\"", msg)
+    if (NR > 1) printf ","
+    printf "{\"ts\":\"%s\",\"msg\":\"%s\"}", ts, msg
+}'
+printf ']}'

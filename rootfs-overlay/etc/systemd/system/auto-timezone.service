@@ -1,0 +1,12 @@
+[Unit]
+Description=Auto-detect timezone via geo-IP (so logs show local time)
+After=network-online.target systemd-timesyncd.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/auto-timezone.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
