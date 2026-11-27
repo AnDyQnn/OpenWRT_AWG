@@ -929,7 +929,7 @@ async function stRun() {
 // ── Журнал сети: отвалы линка по каждому порту ──
 // SVG рисуется в реальных пикселях контейнера (без растягивания viewBox):
 // узкие отвалы и подписи остаются чёткими; при ресайзе — перерисовка.
-let _nlDays = 7, _nlData = null, _nlFilter = '', _nlRows = 30;
+let _nlDays = 1, _nlData = null, _nlFilter = '', _nlRows = 30;
 const _NL_ROLE = { WAN: 'к провайдеру', LAN: 'в офис', VPN: 'туннель', '': 'порт' };
 const _NL_STATE = { up: 'линк есть', slow: 'пониженная скорость', down: 'линка нет', idle: 'туннель не работал (VPN выключен)', off: 'шлюз выключен или нет данных' };
 const _NL_C = { up: '#238636', slow: '#d29922', down: '#f85149', idle: '#30363d', grid: '#21262d', axis: '#8b949e' };
@@ -969,12 +969,15 @@ function _nlBuckets(spanMs, t0, t1) {
     return { step, name, start, n };
 }
 
+let _nlSeq = 0;
 async function loadNetlog(days) {
     if (days) { _nlDays = days; _nlRows = 30; }
+    const seq = ++_nlSeq, want = _nlDays;
     document.querySelectorAll('[data-nld]').forEach(b => b.classList.toggle('on', +b.dataset.nld === _nlDays));
     const body = $('nl-body'); if (!body) return;
     if (!_nlData || days) body.innerHTML = '<div class="small">Загружаю…</div>';
-    const d = await api('/api/netlog?days=' + _nlDays);
+    const d = await api('/api/netlog?days=' + want);
+    if (seq !== _nlSeq || want !== _nlDays) return;      // пока ждали, выбрали другой период
     if (!d || d.error) { body.textContent = (d && d.error) || 'Не удалось получить журнал'; return; }
     _nlData = d; _nlRender();
 }
@@ -1338,9 +1341,10 @@ function _nlRender() {
         if (wanF) wanF.segments.filter(g => g.state === 'slow').forEach(g =>
             ann.push({ a: _nlT(g.from), b: _nlT(g.to), k: 'slow', label: `WAN ${g.speed || ''} Мбит/с`, tip: `WAN на ${g.speed} Мбит/с вместо ${wanF.full_speed}` }));
         // отвалы: близкие склеиваем в одну полосу (иначе при «моргании» — частокол)
-        const near = span * 0.012;
+        const near = span * 14 / PW;                 // ближе 14 px — одна полоса
         d.ifaces.forEach(f => {
-            const ev = f.events.filter(_nlIsDrop).map(e => ({ a: _nlT(e.ts), b: _nlT(e.ts) + (e.dur || 0) * 1000 })).sort((x, y) => x.a - y.a);
+            const ev = f.events.filter(e => _nlIsDrop(e) && !(f.role === 'VPN' && (e.dur || 0) <= 3))
+                .map(e => ({ a: _nlT(e.ts), b: _nlT(e.ts) + (e.dur || 0) * 1000 })).sort((x, y) => x.a - y.a);
             let cur = null;
             const flush = () => { if (!cur) return;
                 const who = roleName(f) + (f.role ? '' : '');
@@ -1353,8 +1357,25 @@ function _nlRender() {
             });
             flush();
         });
-        (d.off || []).filter(o => _nlT(o.to) - _nlT(o.from) >= 600e3).forEach(o =>
+        (d.off || []).filter(o => _nlT(o.to) - _nlT(o.from) >= 3600e3 && _nlT(o.to) > t0).forEach(o =>
             ann.push({ a: _nlT(o.from), b: _nlT(o.to), k: 'off', label: 'шлюз выключен', tip: 'шлюз был выключен' }));
+        // однотипные полосы одного порта ближе 14 px — одна полоса (иначе «WAN 10» стопкой)
+        ann.forEach(o => { const m = /×(\d+)/.exec(o.label); o.n = m ? +m[1] : 1; o.grp = o.k + '|' + o.label.replace(/ ×\d+$/, '').replace(/^отвал /, 'отвалы '); });
+        ann.sort((x, y) => x.grp < y.grp ? -1 : x.grp > y.grp ? 1 : x.a - y.a);
+        const merged = [];
+        ann.forEach(o => {
+            const l = merged[merged.length - 1];
+            if (l && l.grp === o.grp && o.a - l.b <= near) { l.b = Math.max(l.b, o.b); l.n += o.n; l.tip = o.tip; }
+            else merged.push({ ...o });
+        });
+        merged.forEach(o => {
+            if (o.k === 'drop' && o.n > 1) o.label = o.grp.split('|')[1] + ' ×' + o.n;
+            if (o.k === 'vpn' && o.n > 1) o.label = 'VPN ×' + o.n;
+            if (o.n > 1 && o.k !== 'slow') o.tip = o.tip.replace(/^([^:]+):.*$/, `$1: ${o.n} отвалов`);
+        });
+        ann.length = 0; merged.sort((x, y) => x.a - y.a).forEach(o => ann.push(o));
+        // важность подписи: пониженная скорость и крупные пачки отвалов — первыми
+        ann.forEach(o => { const m = /×(\d+)/.exec(o.label); o.pr = { slow: 1000, drop: 100, vpn: 10, off: 1 }[o.k] + (m ? +m[1] : 1); });
         const AC = { slow: _NL_C.slow, drop: _NL_C.down, vpn: '#3fb9a7', off: '#8b949e' };
         const AO = { slow: .13, drop: .16, vpn: .10, off: .0 };
 
@@ -1379,6 +1400,7 @@ function _nlRender() {
             P.forEach((p, k) => { if (k && p[0] - P[k - 1][0] > gap) { runs.push(cur); cur = []; } cur.push([X(p[0] + met.bucket_s * 500), Y(p[1])]); });
             if (cur.length) runs.push(cur);
             runs.forEach(r => {
+                if (r.length === 1) { sv += `<circle cx="${r[0][0].toFixed(1)}" cy="${r[0][1].toFixed(1)}" r="3" fill="${_nlColor(q.m)}"/>`; return; }
                 const line = _nlSmooth(r);
                 if (q.dir === 'dn') sv += `<path d="${line} L${r[r.length - 1][0].toFixed(1)},${PH} L${r[0][0].toFixed(1)},${PH} Z" fill="url(#nlg${n})"/>`;
                 sv += `<path d="${line}" fill="none" stroke="${_nlColor(q.m)}" stroke-width="${q.dir === 'dn' ? 2 : 1.4}" ${q.dir === 'up' ? 'stroke-dasharray="4 3" stroke-opacity=".8"' : ''} stroke-linejoin="round"/>`;
@@ -1403,13 +1425,14 @@ function _nlRender() {
         sv += '</g>';
         // подписи событий сверху: раскладываем по рядам, чтобы не наезжали
         const rows = Array.from({ length: NROWS }, () => []);
-        ann.forEach(o => {
-            if (o.x == null) return;
+        let nlab = 0;
+        ann.slice().sort((x, y) => y.pr - x.pr).forEach(o => {
+            if (o.x == null || nlab >= 7) return;
             const tw = o.label.length * 6.1 + 12;
             let lx = Math.min(Math.max(o.x + o.w / 2 - tw / 2, LM), LM + PW - tw);
             const r = rows.findIndex(row => row.every(([s0, s1]) => lx > s1 + 4 || lx + tw < s0 - 4));
             if (r < 0) return;
-            rows[r].push([lx, lx + tw]);
+            rows[r].push([lx, lx + tw]); nlab++;
             const y = 4 + (NROWS - 1 - r) * ROW;
             sv += `<g pointer-events="none"><line x1="${(o.x + o.w / 2).toFixed(1)}" y1="${y + 12}" x2="${(o.x + o.w / 2).toFixed(1)}" y2="${BTOP}" stroke="${AC[o.k]}" stroke-opacity=".6"/>
                 <rect x="${lx.toFixed(1)}" y="${y}" width="${tw.toFixed(1)}" height="13" rx="3" fill="#161b22" stroke="${AC[o.k]}" stroke-opacity=".75"/>
@@ -1429,6 +1452,13 @@ function _nlRender() {
             sv += `<g pointer-events="none"><rect x="${(o.x - w / 2).toFixed(1)}" y="${(ty - 10).toFixed(1)}" width="${w}" height="14" rx="3" fill="#0d1117" stroke="${o.c}" stroke-opacity=".7"/>
                 <text x="${o.x.toFixed(1)}" y="${(ty + 0.5).toFixed(1)}" fill="#e6edf3" font-size="10.5" font-weight="600" text-anchor="middle">${txt}</text></g>`;
         });
+        const covFrom = met && met.data_from ? met.data_from * 1000 : null;
+        if (met && covFrom && (t1 - covFrom) < span * 0.15 && _nlDays > 1) {
+            const short = _nlDur((t1 - covFrom) / 1000);
+            sv += `<rect x="${LM + PW / 2 - 260}" y="${(TOP + PH) / 2 - 26}" width="520" height="44" rx="8" fill="#161b22" stroke="#30363d"/>
+                <text x="${LM + PW / 2}" y="${(TOP + PH) / 2 - 8}" fill="#c9d1d9" font-size="12" text-anchor="middle">Скорость пишется с ${_nlFmt(covFrom)} — пока ${short} истории, на этом масштабе её не видно.</text>
+                <text x="${LM + PW / 2}" y="${(TOP + PH) / 2 + 9}" fill="${_NL_C.axis}" font-size="11" text-anchor="middle">Выберите «Сутки». Отвалы и 10 Мбит/с полосами — уже за весь период.</text>`;
+        }
         if (!met) sv += `<text x="${LM + PW / 2}" y="${(TOP + PH) / 2}" fill="${_NL_C.axis}" font-size="12" text-anchor="middle">История скорости копится с момента обновления — первые точки появятся через пару минут.</text>
             <text x="${LM + PW / 2}" y="${(TOP + PH) / 2 + 18}" fill="${_NL_C.axis}" font-size="11" text-anchor="middle" opacity=".8">Выделенные события (отвалы, 10 Мбит/с, выключения) — уже за весь период, из журнала шлюза.</text>`;
         sv += `<line class="nl-xh" x1="0" y1="${BTOP}" x2="0" y2="${PH}" stroke="#8b949e" stroke-dasharray="3 3" visibility="hidden"/>`;
