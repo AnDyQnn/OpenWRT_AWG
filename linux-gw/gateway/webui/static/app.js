@@ -1386,14 +1386,14 @@ function _nlRender() {
     };
     const tickLabel = (t, st) => {
         const dd = new Date(t);
-        if (st < Dd) return dd.getHours() === 0 ? _nlDate(t) : _nlHM(t);
+        if (st < Dd) return dd.getHours() === 0 && dd.getMinutes() === 0 ? _nlDate(t) : _nlHM(t);   // дата — только ровно в полночь
         if (st >= 30 * Dd) return _NL_MON[dd.getMonth()];
         return _nlDate(t);
     };
     const axisSvg = (W, X, yTop, yBot, yTxt, minX = 0, A = t0, B = t1) => ticks(W, A, B).map(([t, st]) => {
         const x = Math.round(X(t)) + 0.5;
         if (x < minX) return '';
-        const bold = st < Dd && new Date(t).getHours() === 0;
+        const bold = st < Dd && new Date(t).getHours() === 0 && new Date(t).getMinutes() === 0;
         return `<line x1="${x}" y1="${yTop}" x2="${x}" y2="${yBot}" stroke="${bold ? '#30363d' : _NL_C.grid}"/>` +
             `<text x="${x}" y="${yTxt}" fill="${bold ? '#c9d1d9' : _NL_C.axis}" font-size="10.5" text-anchor="middle">${tickLabel(t, st)}</text>`;
     }).join('');
