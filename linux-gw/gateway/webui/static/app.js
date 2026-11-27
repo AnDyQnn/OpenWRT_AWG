@@ -1470,7 +1470,13 @@ function _nlRender() {
         // История скорости короче половины периода (сборщик недавно запущен) —
         // ось времени начинаем с данных, иначе линия — полоска у правого края.
         const covF = met && met.data_from ? met.data_from * 1000 : null;
-        const cropX = !!(covF && covF > t0 + span * 0.5 && covF < t1 - 5 * 60e3);
+        // …но НИКОГДА не режем, если в отрезаемой части есть события (отвалы,
+        // пониженная скорость, выключения) — они важнее пустого места под линией
+        const evBefore = !!covF && (d.ifaces.filter(f => !only || f.name === only).some(f =>
+                f.events.some(e => _nlIsDrop(e) && _nlT(e.ts) >= t0 && _nlT(e.ts) < covF) ||
+                f.segments.some(g => g.state === 'slow' && _nlT(g.to) > t0 && _nlT(g.from) < covF)) ||
+            (!only && (d.off || []).some(o => _nlT(o.to) - _nlT(o.from) >= 3600e3 && _nlT(o.to) > t0 && _nlT(o.from) < covF)));
+        const cropX = !!(covF && !evBefore && covF > t0 + span * 0.5 && covF < t1 - 5 * 60e3);
         const T0 = cropX ? Math.max(t0, covF - (t1 - covF) * 0.03) : t0, SPANX = Math.max(1, t1 - T0);
         const X = t => LM + (t - T0) / SPANX * PW;
         const wanF = d.ifaces.find(f => f.role === 'WAN');
