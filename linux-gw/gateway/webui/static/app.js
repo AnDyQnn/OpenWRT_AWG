@@ -402,7 +402,7 @@ async function loadSecurityStats() {
                 <button class="mini" style="margin-left:.3rem" onclick="secUnbanAll()">Разблокировать все</button></div>
                 <div class="small" style="opacity:.7;margin-top:.35rem">Внешние (публичные) адреса, с которых выполнялся подбор пароля. Подключения из локальной сети и по VPN блокировка <b>не затрагивает</b> — блокируются только внешние адреса.</div>`;
         } else if (d.level === 'alarm') {
-            bl.innerHTML = `<div class="sec-line bad">${GWFX.ic('bug')} Идёт ${_esc(d.note || 'подбор пароля')} — адрес будет заблокирован автоматически. <a href="#" onclick="secEvents('logins');return false">Подробнее</a></div>`;
+            bl.innerHTML = `<div class="sec-line bad">${GWFX.ic('bug')} Идёт ${_esc(d.note || 'подбор пароля')} — ${(d.note || '').includes('своей сети') ? 'свои адреса (офис, VPN) автоматически не блокируются: проверьте, чьё это устройство или VPN-клиент' : 'адрес будет заблокирован автоматически'}. <a href="#" onclick="secEvents('logins');return false">Подробнее</a></div>`;
         } else if (d.level === 'warn') {
             bl.innerHTML = `<div class="sec-line warn">${GWFX.ic('warn')} ${_esc(d.note || 'Неудачные входы')}. <a href="#" onclick="secEvents('logins');return false">Подробнее</a></div>`;
         } else {
