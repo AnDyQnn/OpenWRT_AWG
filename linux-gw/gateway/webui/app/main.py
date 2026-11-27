@@ -984,6 +984,19 @@ def api_netlog(days: int = 7):
         v = _netlog_build(days)
     except Exception as e:
         return JSONResponse({"error": f"не удалось прочитать журнал: {e}"}, status_code=500)
+    # история скорости по портам (сборщик gw-netmetrics на хосте) + замеры интернетометра
+    try:
+        out = _host_sh(f"python3 /usr/local/bin/gw-netmetrics.py query --days {days}", timeout=20)
+        v["metrics"] = json.loads(out) if out.strip().startswith("{") else None
+    except Exception:
+        v["metrics"] = None
+    try:
+        hist = json.loads(_ST_HIST.read_text()) if _ST_HIST.exists() else []
+        since = v["since"]
+        v["speedtests"] = [{"ts": x["ts"], **{k: r.get(k) for k in ("path", "provider", "down", "up", "ping_ms")}}
+                           for x in hist if x.get("ts", "") >= since for r in x.get("results", []) if not r.get("error")]
+    except Exception:
+        v["speedtests"] = []
     _NETLOG_CACHE[days] = (time.time(), v)
     return v
 
@@ -2058,7 +2071,7 @@ def qos_measure(req: QosMeasureReq, request: Request):
 # Пишем плоский filter/dhcp-lease.txt (НЕ .conf: это не опция dnsmasq) — его читает
 # entrypoint gw-dnsmasq и подставляет в dhcp-range. Месяц = 30 дней (dnsmasq знает
 # только m/h/d/w). Что ввёл пользователь — храним отдельно, чтобы показать как было.
-_LEASE_TXT = FILTER_DIR / "dhcp-lease.txt"
+_LEASE_TXT = Path("/etc/awg-setup/filter/dhcp-lease.txt")   # тот же каталог, что FILTER_DIR (объявлен ниже)
 _LEASE_JSON = Path("/etc/awg-setup/dhcp-lease.json")
 _LEASE_LIMITS = {"m": (2, 59 * 24 * 60), "h": (1, 24 * 365), "d": (1, 3650), "mo": (1, 120)}
 

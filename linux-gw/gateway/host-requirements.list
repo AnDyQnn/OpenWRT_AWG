@@ -102,6 +102,7 @@ unit gateway-compose.service
 unit gateway-ready.service
 unit client-traffic.service
 unit gw-qos.service
+unit gw-netmetrics.service
 unit auto-timezone.service
 unit gateway-update-guard.service
 

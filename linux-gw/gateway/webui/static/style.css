@@ -820,3 +820,9 @@ tr.nl-row-muted td { color: var(--muted); }
 .nl-tr i.nl-hatch { height: 9px; background: repeating-linear-gradient(135deg, #8b949e 0 2px, transparent 2px 5px); }
 .nl-tr span { color: var(--muted); font-size: 0.72rem; }
 .nl-tr b { margin-left: auto; padding-left: 1rem; font-variant-numeric: tabular-nums; }
+.nl-sc-band.base i { background: none; border: none; border-top: 2px dashed rgba(230,237,243,0.6); height: 0; width: 16px; }
+.nl-sc-band.st i { width: 9px; height: 9px; background: #f0f6fc; transform: rotate(45deg); border: none; border-radius: 1px; }
+.nl-sc-band i.a-slow { background: rgba(210,153,34,0.3); border-top: 2px solid var(--warn); }
+.nl-sc-band i.a-drop { background: rgba(248,81,73,0.3); border-top: 2px solid var(--bad); }
+.nl-sc-band i.a-vpn { background: rgba(63,185,167,0.25); border-top: 2px solid #3fb9a7; }
+.nl-sc-band i.a-off { background: repeating-linear-gradient(135deg, #8b949e 0 2px, transparent 2px 5px); border-top: 2px solid #8b949e; }

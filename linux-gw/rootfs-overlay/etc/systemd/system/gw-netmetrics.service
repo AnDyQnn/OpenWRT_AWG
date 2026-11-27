@@ -1,0 +1,16 @@
+[Unit]
+Description=Gateway: история скорости по портам (для графика «Журнал сети»)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/bin/gw-netmetrics.py collect
+Restart=always
+RestartSec=10
+Nice=10
+# лёгкий: 5-секундные счётчики из /sys и одна запись SQLite в минуту
+MemoryMax=64M
+
+[Install]
+WantedBy=multi-user.target
