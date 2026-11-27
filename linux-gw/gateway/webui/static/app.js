@@ -1500,7 +1500,8 @@ function _nlRender() {
         const Y = (v, dir = 'dn') => dir === 'up'
             ? MID - Math.min(v, SC.up.top) / SC.up.top * (MID - TOP)
             : MID + Math.min(v, SC.dn.top) / SC.dn.top * (PH - MID);
-        const fmtV = v => v >= 10 ? v.toFixed(0) : v >= 1 ? (+v.toFixed(1)).toString() : v > 0 ? Math.round(v * 1000) + ' К' : '0';
+        // числа шкалы — в единице своей половины (она подписана у оси: Кбит/с или Мбит/с)
+        const fmtN = (v, dir) => SC[dir].top < 1 ? String(Math.round(v * 1000)) : v >= 10 ? v.toFixed(0) : (+v.toFixed(1)).toString();
         const fmtR = v => v >= 1 ? `${(+v.toFixed(1))} Мбит/с` : `${Math.round(v * 1000)} Кбит/с`;
 
         // ── внештатные события — полупрозрачные полосы ПОВЕРХ графика с подписью сверху ──
@@ -1560,7 +1561,7 @@ function _nlRender() {
             for (let k = 1; k * step <= top + 1e-9; k++) {
                 const v = +(k * step).toFixed(3), y = Math.round(Y(v, dir)) + 0.5;
                 sv += `<line x1="${LM}" y1="${y}" x2="${LM + PW}" y2="${y}" stroke="${_NL_C.grid}"/>
-                    <text x="${LM - 6}" y="${y + 3.5}" fill="${_NL_C.axis}" font-size="10.5" text-anchor="end">${fmtV(v)}</text>`;
+                    <text x="${LM - 6}" y="${y + 3.5}" fill="${_NL_C.axis}" font-size="10.5" text-anchor="end">${fmtN(v, dir)}</text>`;
             }
         });
         sv += `<line x1="${LM}" y1="${MID + 0.5}" x2="${LM + PW}" y2="${MID + 0.5}" stroke="#484f58"/>
@@ -1605,7 +1606,7 @@ function _nlRender() {
                 if (!v) return;
                 const y = Y(v, dir);
                 sv += `<path d="M${tx.toFixed(1)},${(y - 6).toFixed(1)} l6,6 l-6,6 l-6,-6 Z" fill="#f0f6fc" stroke="#0d1117" stroke-width="1.2"/>`;
-                if (v > SC[dir].top) sv += `<text x="${(tx + 9).toFixed(1)}" y="${(y + 4).toFixed(1)}" fill="#f0f6fc" font-size="10" font-weight="600">${dir === 'up' ? '▲' : '▼'} ${fmtV(v)}</text>`;
+                if (v > SC[dir].top) sv += `<text x="${(tx + 9).toFixed(1)}" y="${(y + 4).toFixed(1)}" fill="#f0f6fc" font-size="10" font-weight="600">${dir === 'up' ? '▲' : '▼'} ${fmtR(v)}</text>`;
             });
         });
         sv += '</g>';
@@ -1633,7 +1634,7 @@ function _nlRender() {
         lab.sort((a, b) => b.v - a.v).forEach(o => {
             if (placed.length >= 8) return;
             const over = o.v > SC[o.dir].top, up = o.dir === 'up';
-            const txt = (over ? (up ? '▲ ' : '▼ ') : '') + fmtV(o.v), w = txt.length * 6.5 + 10;
+            const txt = (over ? (up ? '▲ ' : '▼ ') : '') + fmtR(o.v), w = txt.length * 6.2 + 10;
             const ty = up ? (over ? TOP + 12 : Y(o.v, 'up') - 9) : (over ? PH - 6 : Y(o.v, 'dn') + 17);
             if (ty < TOP + 4 || ty > PH || o.x < LM + w / 2 || o.x > LM + PW - w / 2 || placed.some(p => Math.abs(p.x - o.x) < (w + p.w) / 2 + 4 && Math.abs(p.y - ty) < 16)) return;
             placed.push({ x: o.x, y: ty, w });
