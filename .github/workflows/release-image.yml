@@ -13,6 +13,12 @@ name: release-image
 #
 # Запуск: вкладка Actions → release-image → Run workflow (версия берётся из
 # linux-gw/gateway/VERSION), либо пуш тега вида linux-gw-v2.11.0.
+#
+# ШЛАГБАУМ: образ собирается ТОЛЬКО если проверка канала (build-test-publish,
+# smoke-test всего стека) для ЭТОГО ЖЕ коммита прошла. Иначе — как с 2.12.3:
+# канал проверку не прошёл и до шлюзов не дошёл, а образ с битой панелью всё
+# равно собрался и попал в релизы. Ручной запуск может пропустить шлагбаум
+# флажком skip_gate (только если точно знаешь, зачем).
 
 on:
   workflow_dispatch:
@@ -21,11 +27,43 @@ on:
         description: "Пометить релиз как предварительный"
         type: boolean
         default: false
+      skip_gate:
+        description: "Не ждать проверку канала (build-test-publish) — только в крайнем случае"
+        type: boolean
+        default: false
   push:
     tags: [ 'linux-gw-v*' ]
 
 jobs:
+  gate:
+    # ждём build-test-publish для этого коммита (он запускается пушем в main)
+    if: ${{ !inputs.skip_gate }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      actions: read
+    steps:
+      - name: Проверка канала для этого коммита прошла?
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          for i in $(seq 1 80); do
+            out=$(gh api "repos/${{ github.repository }}/actions/workflows/build-and-release.yml/runs?head_sha=${{ github.sha }}&per_page=10"                   --jq '.workflow_runs | sort_by(.created_at) | last | if . == null then "" else "\(.status) \(.conclusion)" end' 2>/dev/null || true)
+            echo "попытка $i: ${out:-прогона ещё нет}"
+            case "$out" in
+              "completed success") echo "Проверка канала прошла — собираем образ"; exit 0 ;;
+              completed*) echo "::error::Проверка канала (build-test-publish) для ${{ github.sha }} не прошла: $out — образ НЕ собираем"; exit 1 ;;
+            esac
+            sleep 30
+          done
+          echo "::error::За 40 минут не дождались проверки канала для ${{ github.sha }} (коммит не пушился в main?) — образ НЕ собираем"
+          exit 1
+
   build-image:
+    needs: gate
+    # gate пропущен (skip_gate) — собираем; gate упал — нет
+    if: ${{ always() && (needs.gate.result == 'success' || needs.gate.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
