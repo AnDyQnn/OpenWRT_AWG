@@ -914,3 +914,12 @@ tr.nl-det > td { max-width: 0; overflow: hidden; }
 .nl-tbl::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
 .nl-tbl::-webkit-scrollbar-track { background: transparent; }
 @media (max-width: 760px) { .nl-ports { overflow-x: auto; } }
+/* очевидное раскрытие детализации порта */
+.nl-ports-hint { font-size: 0.8rem; color: var(--muted); margin: 0 0 0.4rem; }
+.nl-ports-hint b { color: var(--accent); }
+.nl-more-cell { text-align: right; white-space: nowrap; vertical-align: middle !important; }
+.nl-more-btn { display: inline-block; padding: 0.25rem 0.65rem; border-radius: 6px; font-size: 0.8rem; font-weight: 600;
+    color: var(--accent); border: 1px solid rgba(88,166,255,0.45); background: rgba(88,166,255,0.08); transition: background .15s; }
+.nl-prow:hover .nl-more-btn { background: rgba(88,166,255,0.2); border-color: var(--accent); }
+.nl-more-btn.on { color: var(--muted); border-color: var(--border); background: transparent; }
+.nl-prow:hover td { background: rgba(88,166,255,0.05); }

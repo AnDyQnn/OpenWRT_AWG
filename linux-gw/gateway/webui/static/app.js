@@ -1256,8 +1256,10 @@ function _nlRender() {
         <div class="nl-main"></div></div>`;
 
     // ── порты: сводная таблица (всё временное — на общем графике выше) ──
-    h += `<div class="nl-ports"><table><thead><tr><th>Порт</th><th>Сейчас</th><th>Отвалов</th><th>Без линка</th>
-        <th>На пониженной скорости</th><th>Проблемные периоды</th></tr></thead><tbody>` +
+    h += `<div class="nl-ports-hint">📊 Нажмите на порт — откроется <b>подробная инфографика</b>: график только этого порта,
+        ошибки кабеля (CRC, смены линка), скорость и трафик за период, последние события.</div>
+        <div class="nl-ports"><table><thead><tr><th>Порт</th><th>Сейчас</th><th>Отвалов</th><th>Без линка</th>
+        <th>На пониженной скорости</th><th>Проблемные периоды</th><th></th></tr></thead><tbody>` +
         d.ifaces.map(f => {
             const st = f.up ? (f.full_speed && f.speed && f.speed < f.full_speed ? 'warn' : 'ok') : 'bad';
             const now = f.role === 'VPN' ? (f.up ? 'поднят' : 'не поднят') : f.up ? (f.speed ? `${f.speed} Мбит/с` : 'линк есть') : 'нет линка';
@@ -1269,8 +1271,9 @@ function _nlRender() {
                 <td class="nl-num ${f.drops ? 'c-bad' : 'c-ok'}"><b>${f.drops}</b>${f.drops ? `<div class="small">до 5 с: ${f.drops_short}</div>` : ''}</td>
                 <td class="nl-num">${f.down_s ? _nlDur(f.down_s) : '—'}</td>
                 <td class="nl-num ${f.slow_s ? 'c-warn' : ''}">${f.slow_s ? `<b>${_nlDur(f.slow_s)}</b><div class="small">${f.slow_events} раз</div>` : '—'}</td>
-                <td>${_nlPeriods(f, t0) || '<span class="small c-ok">нет</span>'}</td></tr>` +
-                (open ? `<tr class="nl-det"><td colspan="6">${_nlPortDetail(f, d, per)}</td></tr>` : '');
+                <td>${_nlPeriods(f, t0) || '<span class="small c-ok">нет</span>'}</td>
+                <td class="nl-more-cell"><span class="nl-more-btn${open ? ' on' : ''}">${open ? 'Свернуть ▴' : '📊 Подробнее ▾'}</span></td></tr>` +
+                (open ? `<tr class="nl-det"><td colspan="7">${_nlPortDetail(f, d, per)}</td></tr>` : '');
         }).join('') + `</tbody></table></div>`;
 
     // ── когда случаются (по часам суток) ──
