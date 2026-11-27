@@ -73,6 +73,19 @@ _ver_gt(){
 #   * прежняя версия сохраняется рядом как .prev (на случай разбора полётов);
 #   * ROLLBACK сюда НЕ заходит — путь восстановления обязан работать на том, что
 #     уже лежит на диске, и не зависеть от сети.
+# Точный коммит ветки-канала. raw.githubusercontent.com по ИМЕНИ ветки отдаёт
+# закэшированную CDN копию до ~5 минут (max-age=300): CI уже выложил версию, а
+# шлюз ещё видит старый манифест и пишет «актуально». API GitHub не кэшируется,
+# а ссылки по SHA неизменяемы — по ним всегда свежий и согласованный коммит.
+# API недоступно (нет сети до него / лимит 60 запросов в час) — по имени ветки, как раньше.
+MANIFEST_REF=/run/awg-setup/manifest.ref
+_channel_ref(){
+    ch=$(_channel); [ -n "$ch" ] || ch="$CHANNEL_DEFAULT"
+    sha=$(curl -fsS --max-time 15 -H "Accept: application/vnd.github.sha" \
+          "https://api.github.com/repos/$REPO/commits/$ch" 2>/dev/null)
+    if printf '%s' "$sha" | grep -qE '^[0-9a-f]{40}$'; then echo "$sha"; else echo "$ch"; fi
+}
+
 _self_update(){
     [ "${GW_UPDATE_REEXEC:-0}" = "1" ] && return 0
     # GW_UPDATE_SELF — шов для тестов (в бою всегда путь по умолчанию)
@@ -80,7 +93,7 @@ _self_update(){
     [ -f "$self" ] || return 0
     ch=$(_channel); [ -n "$ch" ] || ch="$CHANNEL_DEFAULT"
     cand=/run/awg-setup/gateway-update.sh.candidate
-    url="https://raw.githubusercontent.com/$REPO/$ch/rootfs-overlay/usr/local/bin/gateway-update.sh"
+    url="https://raw.githubusercontent.com/$REPO/$(_channel_ref)/rootfs-overlay/usr/local/bin/gateway-update.sh"
     curl -fsSL --max-time 25 "$url" -o "$cand" 2>/dev/null || return 0
     [ -s "$cand" ] || { rm -f "$cand"; return 0; }
     if ! sh -n "$cand" 2>/dev/null; then
@@ -176,8 +189,12 @@ PY
 MANIFEST=/run/awg-setup/manifest.json
 _fetch_manifest(){
     ch=$(_channel); [ -n "$ch" ] || ch="$CHANNEL_DEFAULT"
-    url="https://raw.githubusercontent.com/$REPO/$ch/manifest.json"
-    curl -fsSL --max-time 20 "$url" -o "$MANIFEST" 2>/dev/null
+    ref=$(_channel_ref)
+    url="https://raw.githubusercontent.com/$REPO/$ref/manifest.json"
+    curl -fsSL --max-time 20 "$url" -o "$MANIFEST" 2>/dev/null || return 1
+    # APPLY возьмёт код ровно этого коммита — манифест и код не разъедутся
+    echo "$ref" > "$MANIFEST_REF" 2>/dev/null
+    return 0
 }
 
 # ─────────────────────────── CHECK ───────────────────────────
@@ -320,8 +337,14 @@ do_apply(){
     _status apply running "Загрузка кода и образов $NEW_VER"
     ch=$(_channel); [ -n "$ch" ] || ch="$CHANNEL_DEFAULT"
     rm -rf "$STAGING" 2>/dev/null; mkdir -p "$STAGING"
-    # тянем тарбол ветки-канала (git не требуется)
-    if ! curl -fsSL --max-time 60 "https://codeload.github.com/$REPO/tar.gz/refs/heads/$ch" \
+    # тянем тарбол ветки-канала (git не требуется) — того же коммита, что манифест
+    ref=$(cat "$MANIFEST_REF" 2>/dev/null)
+    if printf '%s' "$ref" | grep -qE '^[0-9a-f]{40}$'; then
+        tgz="https://codeload.github.com/$REPO/tar.gz/$ref"
+    else
+        tgz="https://codeload.github.com/$REPO/tar.gz/refs/heads/$ch"
+    fi
+    if ! curl -fsSL --max-time 60 "$tgz" \
             | tar xz -C "$STAGING" --strip-components=1 2>/dev/null; then
         _log "APPLY: не скачался код ветки $ch — откат"; do_rollback "APPLY:fetch-code" "$BDIR"; rm -f "$LOCK"; return 1
     fi
