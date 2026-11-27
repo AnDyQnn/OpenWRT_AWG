@@ -930,7 +930,7 @@ async function stRun() {
 // SVG рисуется в реальных пикселях контейнера (без растягивания viewBox):
 // узкие отвалы и подписи остаются чёткими; при ресайзе — перерисовка.
 let _nlDays = 1, _nlData = null, _nlFilter = '', _nlRows = 30;
-const _NL_ROLE = { WAN: 'к провайдеру', LAN: 'в офис', VPN: 'туннель', '': 'порт' };
+const _NL_ROLE = { WAN: 'к провайдеру', LAN: 'в офис', VPN: 'туннель', PORT: 'другой порт', '': 'порт' };
 const _NL_STATE = { up: 'линк есть', slow: 'пониженная скорость', down: 'линка нет', idle: 'туннель не работал (VPN выключен)', off: 'шлюз выключен или нет данных' };
 const _NL_C = { up: '#238636', slow: '#d29922', down: '#f85149', idle: '#30363d', grid: '#21262d', axis: '#8b949e' };
 const _NL_MON = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
@@ -985,7 +985,18 @@ async function loadNetlog(days) {
 
 const _nlHidden = new Set();
 // цвет серии закреплён за ролью порта (не за порядком) — фильтр не перекрашивает линии
-function _nlColor(f) { return { WAN: '#58a6ff', LAN: '#bc8cff', VPN: '#3fb9a7' }[f.role] || '#e3b341'; }
+// цвет: гамма — по роли, оттенок — по номеру интерфейса внутри роли (по имени,
+// стабильно): два LAN-порта — два разных фиолетовых, awg0/awg1 — два бирюзовых
+const _NL_PAL = { WAN: ['#58a6ff', '#a5d6ff', '#1f6feb'], LAN: ['#bc8cff', '#e2c5ff', '#8957e5'],
+    VPN: ['#3fb9a7', '#7ee2d3', '#1a8f80'], PORT: ['#e3b341', '#f2cc60', '#bb8009', '#ff9bce', '#f0883e'] };
+const _nlRoleTxt = r => r === 'PORT' || !r ? 'порт' : r;
+function _nlColor(f) {
+    const pal = _NL_PAL[f.role] || _NL_PAL.PORT;
+    const src = (_nlData && ((_nlData.metrics && _nlData.metrics.ifaces) || _nlData.ifaces)) || [];
+    const same = [...new Set(src.filter(x => (x.role || 'PORT') === (f.role || 'PORT')).map(x => x.name))].sort();
+    const i = Math.max(0, same.indexOf(f.name));
+    return pal[i % pal.length];
+}
 function _nlToggle(key) { _nlVis[key] = !_nlSerOn({ key, dir: key.split(':')[1], m: { role: _nlRoleOf(key) } }); _nlRender(); }
 const _nlVis = {};
 function _nlRoleOf(key) { const m = _nlData && _nlData.metrics && _nlData.metrics.ifaces.find(x => x.name === key.split(':')[0]); return m ? m.role : ''; }
@@ -1096,7 +1107,7 @@ function _nlRender() {
     h += `<div class="nl-main-wrap">
         <div class="nl-main-head"><div class="nl-btitle">Скорость интернета по портам, Мбит/с <span class="small">(средняя за ${_nlBucketName(met)})</span></div>
         <div class="nl-series">${serDefs.map(q => `<button class="nl-sc${_nlSerOn(q) ? ' on' : ''}" onclick="_nlToggle('${_esc(q.key)}')" title="Показать/скрыть">
-            <i style="background:${_nlColor(q.m)}${q.dir === 'up' ? ';opacity:.55' : ''}"></i>${_esc(q.m.name)} <span>${_esc(q.m.role)} ${q.dir === 'dn' ? '↓' : '↑'}</span></button>`).join('')}
+            <i style="background:${_nlColor(q.m)}${q.dir === 'up' ? ';opacity:.55' : ''}"></i>${_esc(q.m.name)} <span>${_esc(_nlRoleTxt(q.m.role))} ${q.dir === 'dn' ? '↓' : '↑'}</span></button>`).join('')}
         <span class="nl-sc-band"><i class="a-slow"></i>WAN на пониженной скорости</span>
         <span class="nl-sc-band"><i class="a-drop"></i>отвалы</span>
         <span class="nl-sc-band"><i class="a-vpn"></i>VPN пропадал</span>
@@ -1110,7 +1121,7 @@ function _nlRender() {
         d.ifaces.map(f => {
             const st = f.up ? (f.full_speed && f.speed && f.speed < f.full_speed ? 'warn' : 'ok') : 'bad';
             const now = f.role === 'VPN' ? (f.up ? 'поднят' : 'не поднят') : f.up ? (f.speed ? `${f.speed} Мбит/с` : 'линк есть') : 'нет линка';
-            return `<tr><td><span class="dot ${st}"></span> <b>${_esc(f.name)}</b> <span class="nl-role nl-role-${(f.role || 'x').toLowerCase()}">${_esc(f.role || 'порт')}</span>
+            return `<tr><td><span class="dot ${st}"></span> <b>${_esc(f.name)}</b> <span class="nl-role nl-role-${(f.role || 'x').toLowerCase()}">${_esc(_nlRoleTxt(f.role))}</span>
                     <div class="small">${_esc(_NL_ROLE[f.role] || '')}</div></td>
                 <td class="nl-num ${st === 'ok' ? '' : 'c-' + st}">${_esc(now)}</td>
                 <td class="nl-num ${f.drops ? 'c-bad' : 'c-ok'}"><b>${f.drops}</b>${f.drops ? `<div class="small">до 5 с: ${f.drops_short}</div>` : ''}</td>
@@ -1141,7 +1152,7 @@ function _nlRender() {
     rows = rows.filter(r => !_nlFilter || !r.f || r.f.name === _nlFilter).sort((a, b) => (b.ts < a.ts ? -1 : 1));
     const total = rows.length; rows = rows.slice(0, _nlRows);
     const opts = ['<option value="">все порты</option>'].concat(d.ifaces.map(f =>
-        `<option value="${_esc(f.name)}"${_nlFilter === f.name ? ' selected' : ''}>${_esc(f.name)} (${_esc(f.role || 'порт')})</option>`)).join('');
+        `<option value="${_esc(f.name)}"${_nlFilter === f.name ? ' selected' : ''}>${_esc(f.name)} (${_esc(_nlRoleTxt(f.role))})</option>`)).join('');
     h += `<div class="nl-block"><div class="nl-tbl-head"><div class="nl-btitle">События</div>
         <select onchange="_nlFilter=this.value;_nlRows=30;_nlRender()">${opts}</select>
         <span class="small">загрузок шлюза ${per}: ${d.boots}</span></div>`;
@@ -1153,7 +1164,7 @@ function _nlRender() {
             const ev = r.f && r.f.role === 'VPN' && bad ? (r.dur <= 3 ? 'туннель перезапущен' : 'туннель пропадал') : (kinds[r.kind] || r.kind);
             return `<tr class="${r.kind === 'boot' || r.kind === 'idle' ? 'nl-row-muted' : ''}">
                 <td class="nl-num">${_esc(r.ts.slice(8, 10) + '.' + r.ts.slice(5, 7) + '.' + r.ts.slice(0, 4))} <b>${_esc(r.ts.slice(11))}</b></td>
-                <td class="nl-num">${r.f ? `${_esc(r.f.name)} <span class="nl-role nl-role-${(r.f.role || 'x').toLowerCase()}">${_esc(r.f.role)}</span>` : '—'}</td>
+                <td class="nl-num">${r.f ? `${_esc(r.f.name)} <span class="nl-role nl-role-${(r.f.role || 'x').toLowerCase()}">${_esc(_nlRoleTxt(r.f.role))}</span>` : '—'}</td>
                 <td>${bad ? '<i class="nl-dot"></i>' : ''}${_esc(ev)}</td>
                 <td class="nl-num">${r.dur != null ? _esc(_nlDur(r.dur)) : ''}</td>
                 <td class="nl-num">${r.speed ? (slow ? `<span class="nl-pill warn">${r.speed} Мбит/с</span>` : `${r.speed} Мбит/с`) : ''}</td></tr>`;

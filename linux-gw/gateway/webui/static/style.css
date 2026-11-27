@@ -837,3 +837,4 @@ tr.nl-row-muted td { color: var(--muted); }
 .nl-ports td .dot { margin: 0 0.15rem 0 0; vertical-align: 1px; }
 .nl-ports .nl-pers { margin: 0; }
 .nl-ports .nl-pr { grid-template-columns: 104px 82px 14px 82px auto; }
+.nl-role-port { color: #e3b341; border-color: rgba(227,179,65,0.45); background: rgba(227,179,65,0.08); }

@@ -880,8 +880,10 @@ def _netlog_build(since, until) -> dict:
     except Exception:
         lan_ports = set()
     names = {e[1] for e in ev} | ({wan} if wan else set()) | lan_ports
-    if os.path.exists("/sys/class/net/awg0"):
-        names.add("awg0")
+    try:      # все туннели, сколько бы их ни было (awg0, awg1, wg*, tun*)
+        names |= {n for n in os.listdir("/sys/class/net") if n.startswith(("awg", "wg", "tun"))}
+    except Exception:
+        pass
     names = {n for n in names if os.path.exists(f"/sys/class/net/{n}") or any(e[1] == n for e in ev)}
 
     def role(n):
@@ -889,12 +891,12 @@ def _netlog_build(since, until) -> dict:
             return "WAN"
         if n in lan_ports or n == "br-lan":
             return "LAN"
-        if n.startswith("awg"):
+        if n.startswith(("awg", "wg", "tun")):
             return "VPN"
-        return ""
+        return "PORT"
 
     def cur(n):
-        if n.startswith("awg"):          # у туннеля нет «скорости линка» (ядро пишет 10)
+        if n.startswith(("awg", "wg", "tun")):   # у туннеля нет «скорости линка» (ядро пишет 10)
             return os.path.exists(f"/sys/class/net/{n}"), None
         try:
             carrier = Path(f"/sys/class/net/{n}/carrier").read_text().strip() == "1"
@@ -908,8 +910,8 @@ def _netlog_build(since, until) -> dict:
         return carrier, sp
 
     res = []
-    order = {"WAN": 0, "LAN": 1, "VPN": 2, "": 3}
-    for n in sorted(names, key=lambda x: (order[role(x)], x)):
+    order = {"WAN": 0, "LAN": 1, "VPN": 2}
+    for n in sorted(names, key=lambda x: (order.get(role(x), 3), x)):
         carrier, cur_sp = cur(n)
         mine = sorted([e for e in ev if e[1] == n], key=lambda e: e[0])
         speeds = [e[3] for e in mine if e[3]] + ([cur_sp] if cur_sp else [])

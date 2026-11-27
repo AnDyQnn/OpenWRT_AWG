@@ -50,8 +50,18 @@ def ports():
             out.setdefault(p, "LAN")
     except Exception:
         pass
-    if os.path.exists("/sys/class/net/awg0"):
-        out["awg0"] = "VPN"
+    # все остальные интерфейсы — сами: туннели (awg*/wg*/tun*) = VPN, прочие
+    # (второй провайдер, модем, Wi‑Fi) = «порт». Служебные и сами мосты не берём.
+    try:
+        names = os.listdir("/sys/class/net")
+    except Exception:
+        names = []
+    for n in names:
+        if n in out or n == "lo" or n.startswith(("docker", "veth", "br-", "br", "virbr", "dummy")):
+            continue
+        if os.path.exists(f"/sys/class/net/{n}/bridge"):      # мост (в т.ч. с другим именем)
+            continue
+        out[n] = "VPN" if n.startswith(("awg", "wg", "tun")) else "PORT"
     return out
 
 
