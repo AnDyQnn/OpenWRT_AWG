@@ -827,3 +827,13 @@ tr.nl-row-muted td { color: var(--muted); }
 .nl-sc-band i.a-vpn { background: rgba(63,185,167,0.25); border-top: 2px solid #3fb9a7; }
 .nl-sc-band i.a-off { background: repeating-linear-gradient(135deg, #8b949e 0 2px, transparent 2px 5px); border-top: 2px solid #8b949e; }
 .sec-line.warn { border-left-color: var(--warn, #d29922); }
+.nl-range { display: inline-flex; align-items: center; gap: 0.3rem; }
+.nl-range input[type="date"] { width: auto; padding: 0.25rem 0.4rem; margin: 0; font-size: 0.82rem; color-scheme: dark; }
+#nl-range-go.on { color: var(--accent); border-color: var(--accent); background: rgba(88,166,255,0.12); }
+.nl-ports { border: 1px solid var(--border); border-radius: 10px; overflow: auto; margin: 0 0 0.9rem; }
+.nl-ports table { margin: 0; }
+.nl-ports th { font-size: 0.78rem; background: var(--bg2); white-space: nowrap; }
+.nl-ports td { vertical-align: top; padding: 0.55rem 0.7rem; }
+.nl-ports td .dot { margin: 0 0.15rem 0 0; vertical-align: 1px; }
+.nl-ports .nl-pers { margin: 0; }
+.nl-ports .nl-pr { grid-template-columns: 104px 82px 14px 82px auto; }

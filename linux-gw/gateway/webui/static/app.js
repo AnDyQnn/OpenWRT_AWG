@@ -969,15 +969,16 @@ function _nlBuckets(spanMs, t0, t1) {
     return { step, name, start, n };
 }
 
-let _nlSeq = 0;
+let _nlSeq = 0, _nlRange = null;   // _nlRange = {start, end} — календарные даты
 async function loadNetlog(days) {
-    if (days) { _nlDays = days; _nlRows = 30; }
-    const seq = ++_nlSeq, want = _nlDays;
-    document.querySelectorAll('[data-nld]').forEach(b => b.classList.toggle('on', +b.dataset.nld === _nlDays));
+    if (days) { _nlDays = days; _nlRows = 30; _nlRange = null; }
+    const seq = ++_nlSeq, want = _nlDays, rng = _nlRange;
+    document.querySelectorAll('[data-nld]').forEach(b => b.classList.toggle('on', !_nlRange && +b.dataset.nld === _nlDays));
+    if ($('nl-range-go')) $('nl-range-go').classList.toggle('on', !!_nlRange);
     const body = $('nl-body'); if (!body) return;
     if (!_nlData || days) body.innerHTML = '<div class="small">Загружаю…</div>';
-    const d = await api('/api/netlog?days=' + want);
-    if (seq !== _nlSeq || want !== _nlDays) return;      // пока ждали, выбрали другой период
+    const d = await api(rng ? `/api/netlog?start=${rng.start}&end=${rng.end}` : '/api/netlog?days=' + want);
+    if (seq !== _nlSeq) return;      // пока ждали, выбрали другой период
     if (!d || d.error) { body.textContent = (d && d.error) || 'Не удалось получить журнал'; return; }
     _nlData = d; _nlRender();
 }
@@ -1017,7 +1018,7 @@ function _nlSmooth(p) {
 function _nlPeriods(f, t0) {
     const pick = (st, minS) => f.segments.filter(g => g.state === st && (_nlT(g.to) - _nlT(g.from)) / 1000 >= minS && _nlT(g.to) > t0);
     const vpn = f.role === 'VPN';
-    const all = pick('slow', 30).map(g => ({ g, cls: 'warn', what: 'на 10 Мбит/с' }))
+    const all = pick('slow', 30).map(g => ({ g, cls: 'warn', what: `на ${g.speed} Мбит/с` }))
         .concat(pick('down', 60).map(g => ({ g, cls: 'bad', what: vpn ? 'туннеля нет' : 'нет линка' })))
         .sort((a, b) => (a.g.from < b.g.from ? 1 : -1));
     if (!all.length) return '';
@@ -1031,6 +1032,21 @@ function _nlPeriods(f, t0) {
     return `<div class="nl-pers">${head}${rest.length ? `<details><summary>ещё ${rest.length}</summary>${rest.map(row).join('')}</details>` : ''}</div>`;
 }
 
+// календарный день или промежуток из полей «с … по …»
+function nlRange() {
+    const a = $('nl-from').value, b = $('nl-to').value || a;
+    if (!a) { toast('Выберите дату', 'warn'); return; }
+    _nlRange = a <= b ? { start: a, end: b } : { start: b, end: a };
+    _nlRows = 30;
+    loadNetlog();
+}
+function nlDay(shift) {          // стрелки «предыдущий/следующий день»
+    const base = (_nlRange && _nlRange.start) || new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+    const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + shift);
+    const iso = `${d.getFullYear()}-${_p2(d.getMonth() + 1)}-${_p2(d.getDate())}`;
+    $('nl-from').value = iso; $('nl-to').value = iso; nlRange();
+}
+
 function _nlRender() {
     const d = _nlData, body = $('nl-body'); if (!d || !body) return;
     let t0 = _nlT(d.since);
@@ -1042,7 +1058,10 @@ function _nlRender() {
     if (cropped) t0 = dataFrom;
     const span = Math.max(1, t1 - t0);
     const B = _nlBuckets(span, t0, t1);
-    const per = { 1: 'за сутки', 7: 'за неделю', 30: 'за месяц', 90: 'за 3 месяца', 365: 'за год' }[_nlDays] || `за ${_nlDays} дн`;
+    const per = d.range
+        ? (_nlDate(t0) === _nlDate(t1 - 1) ? `за ${_nlDate(t0)}` : `за ${_nlDate(t0)}–${_nlDate(t1 - 1)}`)
+        : ({ 1: 'за сутки', 7: 'за неделю', 30: 'за месяц', 90: 'за 3 месяца', 365: 'за год' }[_nlDays] || `за ${_nlDays} дн`);
+    if (d.range && $('nl-from') && !$('nl-from').value) { $('nl-from').value = d.since.slice(0, 10); }
 
     // ── сводка ──
     const wan = d.ifaces.find(f => f.role === 'WAN') || d.ifaces[0];
@@ -1063,7 +1082,7 @@ function _nlRender() {
         h += tile(wan.down_s > 600 ? 'warn' : '', 'Без линка (нет интернета)', wan.down_s ? _nlDur(wan.down_s) : '0 с', `суммарно ${per}`);
     }
     const blv = d.metrics && d.metrics.baseline;
-    if (blv && blv.dn) h += tile('', 'Обычный максимум WAN ↓', blv.dn + ' Мбит/с', `по пикам за ${blv.days} дн`);
+    if (blv && blv.dn) h += tile('', 'Обычный макс. WAN ↓', blv.dn + ' Мбит/с', `по пикам за ${blv.days} дн`);
     h += tile('', 'Последний отвал', last ? _nlAgo(_nlT(last.ts)) : '—',
         last ? `${_esc(last.f.name)} · ${_nlFmt(_nlT(last.ts))}${last.dur != null ? ' · ' + _nlDur(last.dur) : ''}` : `${per} не было`);
     h += '</div>';
@@ -1085,36 +1104,20 @@ function _nlRender() {
         ${(d.speedtests || []).length ? '<span class="nl-sc-band st"><i></i>замер интернетометра</span>' : ''}</div></div>
         <div class="nl-main"></div></div>`;
 
-    // ── легенда ──
-    h += `<div class="nl-legend">
-        <span><i style="background:${_NL_C.up}"></i>линк есть</span>
-        <span><i style="background:${_NL_C.slow}"></i>пониженная скорость</span>
-        <span><i style="background:${_NL_C.down}"></i>отвал</span>
-        <span><i style="background:${_NL_C.idle}"></i>VPN выключен</span>
-        <span><i class="nl-hatch"></i>шлюз выключен</span>
-        <span><i class="nl-tick"></i>метка отвала</span></div>`;
-
-    // ── по портам ──
-    d.ifaces.forEach((f, i) => {
-        const st = f.up ? (f.full_speed && f.speed && f.speed < f.full_speed ? 'warn' : 'ok') : 'bad';
-        const now = f.role === 'VPN' ? (f.up ? 'поднят' : 'не поднят') : f.up ? (f.speed ? `${f.speed} Мбит/с` : 'линк есть') : 'нет линка';
-        const stats = [];
-        stats.push(`<span class="${f.drops ? 'c-bad' : 'c-ok'}">${f.role === 'VPN' ? 'пропаданий' : 'отвалов'}: <b>${f.drops}</b></span>`);
-        if (f.slow_s) stats.push(`<span class="c-warn">на 10 Мбит/с: <b>${_nlDur(f.slow_s)}</b></span>`);
-        if (f.down_s) stats.push(`<span>${f.role === 'VPN' ? 'не работал' : 'без линка'}: <b>${_nlDur(f.down_s)}</b></span>`);
-        h += `<div class="nl-if">
-            <div class="nl-info">
-                <div class="nl-name"><span class="dot ${st}"></span>${_esc(f.name)}
-                    <span class="nl-role nl-role-${(f.role || 'x').toLowerCase()}">${_esc(f.role || 'порт')}</span></div>
-                <div class="nl-sub">${_esc(_NL_ROLE[f.role] || '')} · сейчас <b class="${st === 'ok' ? '' : 'c-' + st}">${_esc(now)}</b></div>
-                <div class="nl-stats">${stats.join('')}</div>
-            </div>
-            <div class="nl-viz">
-                <div class="nl-strip" data-i="${i}"></div>
-                ${_nlPeriods(f, t0)}
-            </div>
-        </div>`;
-    });
+    // ── порты: сводная таблица (всё временное — на общем графике выше) ──
+    h += `<div class="nl-ports"><table><thead><tr><th>Порт</th><th>Сейчас</th><th>Отвалов</th><th>Без линка</th>
+        <th>На пониженной скорости</th><th>Проблемные периоды</th></tr></thead><tbody>` +
+        d.ifaces.map(f => {
+            const st = f.up ? (f.full_speed && f.speed && f.speed < f.full_speed ? 'warn' : 'ok') : 'bad';
+            const now = f.role === 'VPN' ? (f.up ? 'поднят' : 'не поднят') : f.up ? (f.speed ? `${f.speed} Мбит/с` : 'линк есть') : 'нет линка';
+            return `<tr><td><span class="dot ${st}"></span> <b>${_esc(f.name)}</b> <span class="nl-role nl-role-${(f.role || 'x').toLowerCase()}">${_esc(f.role || 'порт')}</span>
+                    <div class="small">${_esc(_NL_ROLE[f.role] || '')}</div></td>
+                <td class="nl-num ${st === 'ok' ? '' : 'c-' + st}">${_esc(now)}</td>
+                <td class="nl-num ${f.drops ? 'c-bad' : 'c-ok'}"><b>${f.drops}</b>${f.drops ? `<div class="small">до 5 с: ${f.drops_short}</div>` : ''}</td>
+                <td class="nl-num">${f.down_s ? _nlDur(f.down_s) : '—'}</td>
+                <td class="nl-num ${f.slow_s ? 'c-warn' : ''}">${f.slow_s ? `<b>${_nlDur(f.slow_s)}</b><div class="small">${f.slow_events} раз</div>` : '—'}</td>
+                <td>${_nlPeriods(f, t0) || '<span class="small c-ok">нет</span>'}</td></tr>`;
+        }).join('') + `</tbody></table></div>`;
 
     // ── когда случаются (по часам суток) ──
     const hod = new Array(24).fill(0);
@@ -1205,62 +1208,6 @@ function _nlRender() {
         return `<line x1="${x}" y1="${yTop}" x2="${x}" y2="${yBot}" stroke="${bold ? '#30363d' : _NL_C.grid}"/>` +
             `<text x="${x}" y="${yTxt}" fill="${bold ? '#c9d1d9' : _NL_C.axis}" font-size="10.5" text-anchor="middle">${tickLabel(t, st)}</text>`;
     }).join('');
-
-    body.querySelectorAll('.nl-strip').forEach(el => {
-        const f = d.ifaces[+el.dataset.i], W = Math.max(200, el.clientWidth), PW = W - L - 4, X = t => L + (t - t0) / span * PW;
-        const SY = 14, SH = 28;   // полоса; над ней — ряд меток отвалов
-        const id = el.dataset.i;
-        let s = `<svg width="${W}" height="${SY + SH + 20}" class="nl-svg">
-            <defs><pattern id="nlh${id}" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-            <rect width="6" height="6" fill="#161b22"/><line x1="0" y1="0" x2="0" y2="6" stroke="#484f58" stroke-width="2"/></pattern>
-            <clipPath id="nlc${id}"><rect x="${L}" y="${SY}" width="${PW}" height="${SH}" rx="5"/></clipPath></defs>`;
-        s += axisSvg(W, X, SY - 2, SY + SH + 4, SY + SH + 16);
-        s += `<g clip-path="url(#nlc${id})"><rect x="${L}" y="${SY}" width="${PW}" height="${SH}" fill="#0d1117"/>`;
-        const ord = { up: 0, idle: 1, off: 2, slow: 3, down: 4 };
-        f.segments.slice().sort((a, b) => ord[a.state] - ord[b.state]).forEach(g => {
-            const a = Math.max(_nlT(g.from), t0), b = _nlT(g.to);
-            if (b <= t0) return;
-            const x = X(a), w = Math.max(X(b) - x, g.state === 'down' ? 2 : g.state === 'up' ? 0 : 1);
-            const fill = g.state === 'off' ? `url(#nlh${id})` : _NL_C[g.state];
-            s += `<rect x="${x.toFixed(1)}" y="${SY}" width="${w.toFixed(1)}" height="${SH}" fill="${fill}" opacity="${g.state === 'up' ? 0.55 : 1}"/>`;
-        });
-        s += '</g>';
-        // подписи прямо на цветных участках: «с — по», если влезает; иначе длительность
-        f.segments.forEach(g => {
-            if (g.state === 'up') return;
-            const a = Math.max(_nlT(g.from), t0), b = _nlT(g.to);
-            const x0 = X(a), x1 = X(b), w = x1 - x0;
-            if (w < 46) return;
-            const full = `${_nlFmt(a)} — ${_nlFmt(b)}`, mid = `${_nlDate(a)} — ${_nlDate(b)}`, dur = _nlDur((b - a) / 1000);
-            const txt = w >= full.length * 6.4 + 12 ? full : (w >= mid.length * 6.4 + 12 && _nlDate(a) !== _nlDate(b)) ? mid : dur;
-            if (txt.length * 6.4 + 8 > w) return;
-            const dark = g.state === 'slow' || g.state === 'down';
-            s += `<text x="${((x0 + x1) / 2).toFixed(1)}" y="${SY + SH / 2 + 4}" font-size="10.5" font-weight="600" text-anchor="middle"
-                fill="${dark ? '#0d1117' : '#c9d1d9'}" pointer-events="none">${txt}</text>`;
-        });
-        // метки отвалов над полосой: видно частоту даже там, где отвал длится секунду
-        f.events.forEach(e => {
-            if (!_nlIsDrop(e)) return;
-            const x = X(_nlT(e.ts)); if (x < L || x > L + PW) return;
-            s += `<rect x="${(x - 1).toFixed(1)}" y="2" width="2" height="8" rx="1" fill="${_NL_C.down}"/>`;
-        });
-        el.innerHTML = s + '</svg>';
-        const svg = el.firstChild;
-        svg.addEventListener('mousemove', ev => {
-            const r = svg.getBoundingClientRect(), t = t0 + (ev.clientX - r.left - L) / PW * span, tol = 5 / PW * span;
-            if (t < t0 || t > t1) return hide();
-            let g = f.segments.find(g => (g.state === 'down' || g.state === 'slow') && _nlT(g.from) - tol <= t && t <= _nlT(g.to) + tol);
-            if (!g) g = f.segments.find(g => _nlT(g.from) <= t && t <= _nlT(g.to));
-            if (!g) return hide();
-            const a = _nlT(g.from), b = _nlT(g.to);
-            const sn = f.role === 'VPN' && g.state === 'up' ? 'туннель работает' : f.role === 'VPN' && g.state === 'down' ? 'туннель не поднят' : _NL_STATE[g.state];
-            const near = f.events.filter(e => _nlIsDrop(e) && Math.abs(_nlT(e.ts) - t) <= tol * 2).length;
-            const cls = { up: 'ok', slow: 'warn', down: 'bad' }[g.state] || 'mut';
-            show(ev, `<b>${_esc(f.name)}</b> · <span class="c-${cls}">${_esc(sn)}</span>${g.speed ? ` · ${g.speed} Мбит/с` : ''}
-                <br>${_nlFmt(a, true)} — ${_nlFmt(b, true)}<br>длительность: <b>${_nlDur((b - a) / 1000)}</b>${near > 1 ? `<br>отвалов рядом: ${near}` : ''}`);
-        });
-        svg.addEventListener('mouseleave', hide);
-    });
 
     // график значений: line=true — линия с заливкой и точками (как график трафика в SIEM),
     // иначе столбики. Над точками/столбиками — цифры (без наложения), при наведении —
@@ -1457,10 +1404,10 @@ function _nlRender() {
             const short = _nlDur((t1 - covFrom) / 1000);
             sv += `<rect x="${LM + PW / 2 - 260}" y="${(TOP + PH) / 2 - 26}" width="520" height="44" rx="8" fill="#161b22" stroke="#30363d"/>
                 <text x="${LM + PW / 2}" y="${(TOP + PH) / 2 - 8}" fill="#c9d1d9" font-size="12" text-anchor="middle">Скорость пишется с ${_nlFmt(covFrom)} — пока ${short} истории, на этом масштабе её не видно.</text>
-                <text x="${LM + PW / 2}" y="${(TOP + PH) / 2 + 9}" fill="${_NL_C.axis}" font-size="11" text-anchor="middle">Выберите «Сутки». Отвалы и 10 Мбит/с полосами — уже за весь период.</text>`;
+                <text x="${LM + PW / 2}" y="${(TOP + PH) / 2 + 9}" fill="${_NL_C.axis}" font-size="11" text-anchor="middle">Выберите «Сутки». Отвалы и пониженная скорость — полосами за весь период.</text>`;
         }
         if (!met) sv += `<text x="${LM + PW / 2}" y="${(TOP + PH) / 2}" fill="${_NL_C.axis}" font-size="12" text-anchor="middle">История скорости копится с момента обновления — первые точки появятся через пару минут.</text>
-            <text x="${LM + PW / 2}" y="${(TOP + PH) / 2 + 18}" fill="${_NL_C.axis}" font-size="11" text-anchor="middle" opacity=".8">Выделенные события (отвалы, 10 Мбит/с, выключения) — уже за весь период, из журнала шлюза.</text>`;
+            <text x="${LM + PW / 2}" y="${(TOP + PH) / 2 + 18}" fill="${_NL_C.axis}" font-size="11" text-anchor="middle" opacity=".8">Выделенные события (отвалы, пониженная скорость, выключения) — уже за весь период, из журнала шлюза.</text>`;
         sv += `<line class="nl-xh" x1="0" y1="${BTOP}" x2="0" y2="${PH}" stroke="#8b949e" stroke-dasharray="3 3" visibility="hidden"/>`;
         vis.forEach((q, n) => { sv += `<circle class="nl-xp" data-n="${n}" r="4" fill="${_nlColor(q.m)}" stroke="#e6edf3" stroke-width="1.5" visibility="hidden"/>`; });
         mainEl.innerHTML = sv + '</svg>';

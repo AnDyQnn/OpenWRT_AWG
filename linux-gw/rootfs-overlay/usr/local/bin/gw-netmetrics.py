@@ -152,22 +152,27 @@ def collect():
         time.sleep(max(0.5, SAMPLE - (time.time() - t)))
 
 
-def query(days):
+def query(days, t_from=None, t_to=None):
     now = int(time.time())
-    since = now - days * 86400
+    until = min(int(t_to), now) if t_to else now
+    since = int(t_from) if t_from else now - days * 86400
+    span_d = max(1.0, (until - since) / 86400)
     # ~300–400 точек на период
-    bucket = 300 if days <= 1 else 1800 if days <= 7 else 7200 if days <= 30 else 21600 if days <= 90 else 86400
-    out = {"bucket_s": bucket, "since": since, "now": now, "ifaces": [], "baseline": None, "data_from": None}
+    bucket = 300 if span_d <= 1.5 else 1800 if span_d <= 8 else 7200 if span_d <= 31 else 21600 if span_d <= 92 else 86400
+    out = {"bucket_s": bucket, "since": since, "now": until, "ifaces": [], "baseline": None, "data_from": None}
     if not os.path.exists(DB):
         return out
     c = sqlite3.connect(f"file:{DB}?mode=ro", uri=True, timeout=10)
+    if bucket < 900 and since < now - 3 * 86400 + 600:
+        bucket = 900
+        out["bucket_s"] = bucket
     if bucket < 900:
         rows = c.execute(f"""SELECT ifn, role, (ts/{bucket})*{bucket} AS b, avg(dn), avg(up), max(dn_pk), max(up_pk),
-            min(link), sum(down_s) FROM m1 WHERE ts >= ? GROUP BY ifn, b ORDER BY b""", (since,)).fetchall()
+            min(link), sum(down_s) FROM m1 WHERE ts >= ? AND ts < ? GROUP BY ifn, b ORDER BY b""", (since, until)).fetchall()
     else:
         rows = c.execute(f"""SELECT ifn, role, (ts/{bucket})*{bucket} AS b, sum(dn_sum)/sum(n), sum(up_sum)/sum(n),
-            max(dn_pk), max(up_pk), min(link), sum(down_s) FROM m15 WHERE ts >= ? GROUP BY ifn, b ORDER BY b""",
-                         (since,)).fetchall()
+            max(dn_pk), max(up_pk), min(link), sum(down_s) FROM m15 WHERE ts >= ? AND ts < ? GROUP BY ifn, b ORDER BY b""",
+                         (since, until)).fetchall()
     by = {}
     for ifn, role, b, dn, up, dpk, upk, link, down_s in rows:
         s = by.setdefault(ifn, {"name": ifn, "role": role, "t": [], "dn": [], "up": [], "dn_pk": [], "up_pk": [],
@@ -196,12 +201,12 @@ if __name__ == "__main__":
         collect()
     elif cmd == "query":
         days = 7
-        if "--days" in sys.argv:
-            try:
-                days = max(1, min(365, int(sys.argv[sys.argv.index("--days") + 1])))
-            except Exception:
-                pass
-        print(json.dumps(query(days), ensure_ascii=False, separators=(",", ":")))
+        arg = lambda k: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else None
+        try:
+            days = max(1, min(365, int(arg("--days") or 7)))
+        except Exception:
+            pass
+        print(json.dumps(query(days, arg("--from"), arg("--to")), ensure_ascii=False, separators=(",", ":")))
     else:
         print(__doc__)
         sys.exit(2)

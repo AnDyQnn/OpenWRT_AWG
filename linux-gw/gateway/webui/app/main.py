@@ -811,20 +811,24 @@ def _netlog_ts(s: str):
     return _dt.datetime.fromisoformat(s)
 
 
-def _netlog_build(days: int) -> dict:
+def _netlog_build(since, until) -> dict:
+    """Журнал за [since, until] (datetime, местное время). Журнал читаем с запасом
+    на 14 дней раньше since — чтобы знать состояние порта на начало промежутка
+    (например, WAN уже «застрял» на 10 Мбит/с до выбранного дня)."""
     import datetime as _dt
     sep = "@@GWSEP@@"
+    jfrom = (since - _dt.timedelta(days=14)).strftime("%Y-%m-%d %H:%M:%S")
+    jto = until.strftime("%Y-%m-%d %H:%M:%S")
     out = _host_sh(
-        f"journalctl _TRANSPORT=kernel --no-pager -o short-iso --since '-{days} days' 2>/dev/null"
+        f"journalctl _TRANSPORT=kernel --no-pager -o short-iso --since '{jfrom}' --until '{jto}' 2>/dev/null"
         " | grep -E '[Ll]ink (is )?(Up|Down|up|down)' | grep -v -E 'GW_FW|martian' | tail -n 8000;"
         f" echo {sep};"
-        f" journalctl _COMM=dhcpcd --no-pager -o short-iso --since '-{days} days' 2>/dev/null"
+        f" journalctl _COMM=dhcpcd --no-pager -o short-iso --since '{jfrom}' --until '{jto}' 2>/dev/null"
         " | grep -E 'awg[0-9]*: (carrier (lost|acquired)|removing interface|using static address)' | tail -n 8000;"
         f" echo {sep}; journalctl --list-boots --no-pager 2>/dev/null | tail -n 400", timeout=45)
     parts = out.split(sep)
     kern, dh, bl = (parts + ["", "", ""])[:3]
-    now = _dt.datetime.now().replace(microsecond=0)
-    since = now - _dt.timedelta(days=days)
+    now = until            # «конец» промежутка (для текущего периода — сейчас)
 
     ev = []  # (ts, iface, 'up'|'down', speed)
     for l in kern.splitlines():
@@ -865,9 +869,10 @@ def _netlog_build(days: int) -> dict:
     boots.sort()
     off = []
     for a, b in zip(boots, boots[1:]):
-        if b[0] > since and (b[0] - a[1]).total_seconds() > 30:
-            off.append((max(a[1], since), b[0]))
-    boot_starts = [b[0] for b in boots if b[0] > since]
+        if b[0] > since and a[1] < until and (b[0] - a[1]).total_seconds() > 30:
+            off.append((max(a[1], since), min(b[0], until)))
+    boot_starts = [b[0] for b in boots if since < b[0] <= until]
+    boots_all = [b[0] for b in boots if b[0] <= until]
 
     wan = _read("/run/awg-setup/wan-port") or _read("/etc/awg-setup/wan-port")
     try:
@@ -910,7 +915,7 @@ def _netlog_build(days: int) -> dict:
         speeds = [e[3] for e in mine if e[3]] + ([cur_sp] if cur_sp else [])
         full = max(speeds) if speeds else None
         # единая лента событий: линк + загрузки шлюза
-        tl = [(e[0], e[2], e[3]) for e in mine] + [(b, "boot", None) for b in boot_starts]
+        tl = [(e[0], e[2], e[3]) for e in mine if e[0] <= until] + [(b, "boot", None) for b in boots_all]
         tl.sort(key=lambda x: (x[0], 0 if x[1] == "boot" else 1))
         segs, events = [], []
         # журнал начинается с первой загрузки: раньше неё данных нет (шлюза ещё
@@ -921,7 +926,9 @@ def _netlog_build(days: int) -> dict:
 
         def push(to, s=None, sp=None):
             nonlocal st_t
-            if to > st_t:
+            if to <= st_t:
+                return
+            if True:
                 if segs and segs[-1]["state"] == (s or st) and segs[-1]["speed"] == sp:
                     segs[-1]["to"] = to.isoformat()
                 else:
@@ -930,12 +937,18 @@ def _netlog_build(days: int) -> dict:
 
         for t, k, sp in tl:
             if t < since:
+                if k == "boot":
+                    st, st_sp, pend = "up", full, None
+                elif k == "down":
+                    st, st_sp = "down", None
+                else:
+                    st, st_sp = "up", sp if sp else (st_sp or full)
                 continue
             if k == "boot":
                 if pend is not None:
                     events.append({"ts": pend.isoformat(sep=" "), "kind": "shutdown", "dur": None, "speed": None})
                     pend = None
-                o = next((x for x in off if x[1] == t), None)
+                o = next((x for x in off if x[1] == min(t, until)), None)
                 if o:
                     push(o[0], st, st_sp if st != "down" else None)
                     push(t, "off", None)
@@ -990,24 +1003,47 @@ def _netlog_build(days: int) -> dict:
             "slow_events": sum(1 for e in events if e["speed"] and full and e["speed"] < full),
             "segments": segs, "events": events[-1500:][::-1], "per_day": per_day,
         })
+    days = max(1, round((until - since).total_seconds() / 86400))
     return {"days": days, "since": since.isoformat(), "now": now.isoformat(),
             "boots": len(boot_starts), "off": [{"from": a.isoformat(), "to": b.isoformat()} for a, b in off],
             "ifaces": res}
 
 
 @app.get("/api/netlog")
-def api_netlog(days: int = 7):
-    days = max(1, min(int(days or 7), 365))
-    c = _NETLOG_CACHE.get(days)
+def api_netlog(days: int = 7, start: str = "", end: str = ""):
+    """Период: последние N дней ИЛИ календарный промежуток start..end (YYYY-MM-DD,
+    включительно; один день — start=end)."""
+    import datetime as _dt
+    now = _dt.datetime.now().replace(microsecond=0)
+    if start:
+        try:
+            since = _dt.datetime.strptime(start[:10], "%Y-%m-%d")
+            until = _dt.datetime.strptime((end or start)[:10], "%Y-%m-%d") + _dt.timedelta(days=1)
+        except Exception:
+            return JSONResponse({"error": "Даты в формате ГГГГ-ММ-ДД"}, status_code=400)
+        if until <= since:
+            since, until = until - _dt.timedelta(days=1), since + _dt.timedelta(days=1)
+        until = min(until, now)
+        if since >= now:
+            return JSONResponse({"error": "Этот день ещё не наступил"}, status_code=400)
+        if (until - since).days > 400:
+            return JSONResponse({"error": "Промежуток не больше 400 дней"}, status_code=400)
+        key = f"{since:%Y%m%d}-{until:%Y%m%d%H%M}"
+    else:
+        days = max(1, min(int(days or 7), 365))
+        until, since = now, now - _dt.timedelta(days=days)
+        key = f"d{days}"
+    c = _NETLOG_CACHE.get(key)
     if c and time.time() - c[0] < 60:
         return c[1]
     try:
-        v = _netlog_build(days)
+        v = _netlog_build(since, until)
     except Exception as e:
         return JSONResponse({"error": f"не удалось прочитать журнал: {e}"}, status_code=500)
+    v["range"] = bool(start)
     # история скорости по портам (сборщик gw-netmetrics на хосте) + замеры интернетометра
     try:
-        out = _host_sh(f"python3 /usr/local/bin/gw-netmetrics.py query --days {days}", timeout=20)
+        out = _host_sh(f"python3 /usr/local/bin/gw-netmetrics.py query --from {int(since.timestamp())} --to {int(until.timestamp())}", timeout=20)
         v["metrics"] = json.loads(out) if out.strip().startswith("{") else None
     except Exception:
         v["metrics"] = None
@@ -1015,10 +1051,12 @@ def api_netlog(days: int = 7):
         hist = json.loads(_ST_HIST.read_text()) if _ST_HIST.exists() else []
         since = v["since"]
         v["speedtests"] = [{"ts": x["ts"], **{k: r.get(k) for k in ("path", "provider", "down", "up", "ping_ms")}}
-                           for x in hist if x.get("ts", "") >= since for r in x.get("results", []) if not r.get("error")]
+                           for x in hist if since <= x.get("ts", "") <= v["now"] for r in x.get("results", []) if not r.get("error")]
     except Exception:
         v["speedtests"] = []
-    _NETLOG_CACHE[days] = (time.time(), v)
+    if len(_NETLOG_CACHE) > 40:
+        _NETLOG_CACHE.clear()
+    _NETLOG_CACHE[key] = (time.time(), v)
     return v
 
 
