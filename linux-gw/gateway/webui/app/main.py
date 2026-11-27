@@ -594,15 +594,11 @@ def security_stats(request: Request):
     banned_ips = sorted({ip for j in jails for ip in j["ips"]})
     # пакеты, сброшенные фаерволом ИМЕННО со стороны WAN (реальные удары снаружи).
     # Считаем только правило «-i <WAN> -j DROP», а не INVALID-дропы.
-    wan_drops = 0
+    # Тот же источник, что у журнала: записи за 7 дней без служебного шума.
     try:
-        r = subprocess.run(_host_prefix() + ["sh", "-c",
-                           "W=$(cat /run/awg-setup/wan-port 2>/dev/null || cat /etc/awg-setup/wan-port 2>/dev/null); "
-                           "iptables -L GW_INPUT -v -x -n 2>/dev/null | awk -v w=\"$W\" '$3==\"DROP\" && $6==w {s+=$1} END{print s+0}'"],
-                           capture_output=True, text=True, timeout=10)
-        wan_drops = int((r.stdout or "0").strip() or 0)
+        wan_drops = len(_wan_events()[0])
     except Exception:
-        pass
+        wan_drops = 0
     # неудачные входы в панель + АКТИВНАЯ угроза (последние 10 мин от НЕ-забаненных IP)
     failed_logins = 0
     recent = []
@@ -668,6 +664,112 @@ def security_stats(request: Request):
             "banned_ips": banned_ips[:20], "wan_drops": wan_drops,
             "failed_logins": failed_logins, "active_threat": max_recent,
             "jails": jails, "recent": recent}
+
+
+# ── Журнал безопасности: что именно стоит за цифрами «отбито» и «неудачные входы» ──
+_PORT_NAMES = {
+    21: "FTP", 22: "SSH", 23: "Telnet", 25: "почта (SMTP)", 53: "DNS", 80: "веб (HTTP)",
+    443: "веб (HTTPS)", 445: "общие папки Windows (SMB)", 1433: "MS SQL", 3306: "MySQL",
+    3389: "удалённый рабочий стол (RDP)", 5900: "VNC", 8080: "веб (HTTP-alt)", 8443: "веб (HTTPS-alt)",
+}
+
+
+def _src_kind(ip: str) -> str:
+    """Откуда адрес — человеческими словами."""
+    try:
+        a = ipaddress.ip_address(ip)
+    except Exception:
+        return "неизвестно"
+    if a.is_loopback:
+        return "с самого шлюза (консоль/скрипт)"
+    if a in ipaddress.ip_network("192.168.88.0/24") or str(a).startswith("192.168.88."):
+        return "из офиса (локальная сеть)"
+    if a in ipaddress.ip_network("10.0.0.0/8"):
+        return "через VPN"
+    if a.is_private:
+        return "из сети провайдера (его роутер или соседнее устройство)"
+    return "из интернета"
+
+
+def _host_sh(cmd: str, timeout: int = 15) -> str:
+    try:
+        r = subprocess.run(_host_prefix() + ["sh", "-c", cmd], capture_output=True, text=True,
+                           timeout=timeout)
+        return r.stdout or ""
+    except Exception:
+        return ""
+
+
+_WAN_EV_CACHE = {"t": 0.0, "v": ([], 0)}
+
+
+def _wan_events() -> tuple[list, int]:
+    """Отбитые фаерволом пакеты с WAN за 7 дней (журнал ядра; лог ограничен 5/мин).
+    Служебный шум (multicast/broadcast, IGMP) отфильтровываем и в старых записях —
+    его логировали версии до 2.12.1. Кэш 60 с: плитку опрашивают каждые 6 с.
+    Источник один и для плитки, и для журнала — цифры не расходятся (счётчик
+    iptables обнуляется при каждой пересборке фаервола и путал)."""
+    if time.time() - _WAN_EV_CACHE["t"] < 60:
+        return _WAN_EV_CACHE["v"]
+    wan, noise = [], 0
+    out = _host_sh("journalctl -k --no-pager -o short-iso --since '-7 days' -g GW_FW_WAN_DROP 2>/dev/null | tail -n 3000")
+    for l in out.splitlines():
+        m = re.match(r"^(\S+)\s.*GW_FW_WAN_DROP", l)
+        if not m:
+            continue
+        f = dict(re.findall(r"\b(SRC|DST|PROTO|DPT)=(\S+)", l))
+        dst = f.get("DST", "")
+        if (f.get("PROTO") == "2" or dst.startswith("224.") or dst.startswith("239.")
+                or dst == "255.255.255.255" or dst.endswith(".255")):
+            noise += 1
+            continue
+        src = f.get("SRC", "")
+        dpt = int(f["DPT"]) if f.get("DPT", "").isdigit() else None
+        what = _PORT_NAMES.get(dpt) if dpt else None
+        if dpt and not what:
+            what = f"порт {dpt}" + (" (вероятно, запоздалый ответ уже закрытому соединению)" if dpt >= 32768 else "")
+        wan.append({"ts": m.group(1)[:19].replace("T", " "), "src": src, "kind": _src_kind(src),
+                    "proto": {"6": "TCP", "17": "UDP", "1": "ICMP"}.get(f.get("PROTO", ""), f.get("PROTO", "")),
+                    "port": dpt, "what": what or ("пинг/служебный пакет" if f.get("PROTO") in ("ICMP", "1") else "")})
+    _WAN_EV_CACHE["t"], _WAN_EV_CACHE["v"] = time.time(), (wan, noise)
+    return wan, noise
+
+
+@app.get("/api/security/events")
+def security_events(request: Request):
+    if not _is_admin(request):
+        return JSONResponse({"error": "Доступно только администратору"}, status_code=403)
+    wan, noise = _wan_events()
+    wan_total = len(wan)
+    by_src = {}
+    for e in wan:
+        by_src[e["src"]] = by_src.get(e["src"], 0) + 1
+    top = sorted(by_src.items(), key=lambda x: -x[1])[:5]
+
+    # 2) Неудачные входы: панель (panel-auth.log) + SSH (журнал sshd).
+    logins = []
+    try:
+        p = Path("/var/log/panel-auth.log")
+        if p.exists():
+            for l in p.read_text(errors="replace").splitlines()[-500:]:
+                m = re.match(r"^(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d).*FAILED login from (\S+)(?: user=(\S*))?", l)
+                if m:
+                    logins.append({"ts": m.group(1), "ip": m.group(2), "user": m.group(3) or "",
+                                   "where": "панель", "kind": _src_kind(m.group(2))})
+    except Exception:
+        pass
+    out = _host_sh("journalctl -u ssh --no-pager -o short-iso --since '-30 days' 2>/dev/null "
+                   "| grep -E 'Failed password|Invalid user' | tail -n 300")
+    for l in out.splitlines():
+        m = re.match(r"^(\S+)\s.*(?:Failed password for (?:invalid user )?(\S+)|Invalid user (\S+)) from (\S+)", l)
+        if m:
+            ip = m.group(4)
+            logins.append({"ts": m.group(1)[:19].replace("T", " "), "ip": ip,
+                           "user": m.group(2) or m.group(3) or "", "where": "SSH", "kind": _src_kind(ip)})
+    logins.sort(key=lambda x: x["ts"])
+    return {"wan": wan[-50:][::-1], "wan_total_7d": wan_total, "wan_noise_7d": noise,
+            "wan_top": [{"src": s, "count": c, "kind": _src_kind(s)} for s, c in top],
+            "logins": logins[-50:][::-1], "logins_total": len(logins)}
 
 
 class UnbanReq(BaseModel):

@@ -407,6 +407,41 @@ async function loadSecurityStats() {
     if ($('sec-kpi-row')) GWFX.icons($('sec-kpi-row'));
     if ($('sec-banned-list')) GWFX.icons($('sec-banned-list'));
 }
+// Журнал безопасности: что стоит за цифрами плиток
+async function secEvents(tab) {
+    const box = $('sec-events'); if (!box) return;
+    box.style.display = '';
+    ['wan', 'logins'].forEach(t => { const b = $('sec-ev-tab-' + t); if (b) b.classList.toggle('success', t === tab); });
+    const body = $('sec-ev-body'); body.innerHTML = 'Загружаю…';
+    const d = await api('/api/security/events');
+    if (!d || d.error) { body.textContent = (d && d.error) || 'ошибка'; return; }
+    const row = (cells) => `<tr>${cells.map(c => `<td>${c}</td>`).join('')}</tr>`;
+    if (tab === 'wan') {
+        $('sec-ev-title').textContent = 'Отбито с интернета — за 7 дней';
+        let h = `<p>Это попытки снаружи достучаться до <b>самого шлюза</b> (панель, SSH и т.п.). Фаервол их отбросил —
+            до шлюза они не дошли. На интернет устройств в офисе это не влияет.</p>`;
+        if (d.wan_noise_7d) h += `<p style="opacity:.75">Служебный шум сети провайдера (multicast/broadcast — роутер провайдера
+            периодически опрашивает сеть) — ${d.wan_noise_7d} записей; это не атаки, в счётчик не входит.</p>`;
+        if (!d.wan.length) h += `<div class="sec-line ok">${GWFX.ic('check')} Попыток снаружи не было.</div>`;
+        else {
+            if (d.wan_top.length) h += `<p><b>Чаще всего:</b> ${d.wan_top.map(t => `${_esc(t.src)} — ${t.count} раз (${_esc(t.kind)})`).join('; ')}</p>`;
+            h += `<table><thead><tr><th>Время</th><th>Откуда</th><th>Кто это</th><th>Куда стучались</th></tr></thead><tbody>` +
+                d.wan.map(e => row([_esc(e.ts), _esc(e.src), _esc(e.kind), _esc([e.proto, e.what].filter(Boolean).join(' · '))])).join('') +
+                `</tbody></table><p style="opacity:.7">Журнал ограничен 5 записями в минуту — при массовом сканировании показаны не все пакеты.</p>`;
+        }
+        body.innerHTML = h;
+    } else {
+        $('sec-ev-title').textContent = 'Неудачные входы';
+        let h = `<p>Неверный логин или пароль в панель или по SSH. Входы <b>из офиса и через VPN</b> — это свои (опечатка в пароле).
+            Подозрительны только входы <b>из интернета</b>: после 5 неудач подряд такой адрес блокируется автоматически.</p>`;
+        if (!d.logins.length) h += `<div class="sec-line ok">${GWFX.ic('check')} Неудачных входов не было.</div>`;
+        else h += `<table><thead><tr><th>Время</th><th>Куда</th><th>Логин</th><th>Адрес</th><th>Откуда</th></tr></thead><tbody>` +
+            d.logins.map(e => row([_esc(e.ts), _esc(e.where), _esc(e.user || '—'), _esc(e.ip),
+                e.kind === 'из интернета' ? `<b style="color:var(--bad)">${_esc(e.kind)}</b>` : _esc(e.kind)])).join('') + `</tbody></table>`;
+        body.innerHTML = h;
+    }
+    GWFX.icons(box);
+}
 async function secUnban(ip) {
     const ok = await uiConfirm(`Разблокировать адрес ${ip}? После этого он снова сможет подключаться к шлюзу.`, 'Разблокировать');
     if (!ok) return;

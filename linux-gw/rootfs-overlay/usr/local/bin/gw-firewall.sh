@@ -48,6 +48,13 @@ if [ -f "$ALLOW_MARK" ]; then
         case "$p" in [0-9]*) iptables -A "$CHAIN" -i "$WAN" -p tcp --dport "$p" -j ACCEPT ;; esac
     done
 fi
+# Служебный шум сети провайдера — multicast/broadcast (IGMP-запросы роутера
+# провайдера каждые ~2 мин, DHCP-запросы соседей, SSDP/mDNS). Это не попытки
+# достучаться до шлюза: дропаем МОЛЧА, без лога и вне счётчика «отбито с
+# интернета» (на шлюзе отца такой шум давал >99% «отбитий»). Ответ DHCP самому
+# шлюзу (sport 67 → dport 68) уже пропущен правилом выше.
+iptables -A "$CHAIN" -i "$WAN" -m pkttype --pkt-type multicast -j DROP
+iptables -A "$CHAIN" -i "$WAN" -m pkttype --pkt-type broadcast -j DROP
 # всё остальное с WAN к шлюзу — дроп (с лимит-логом для статистики безопасности)
 iptables -A "$CHAIN" -i "$WAN" -m limit --limit 5/min --limit-burst 10 -j LOG --log-prefix "GW_FW_WAN_DROP " --log-level 4
 iptables -A "$CHAIN" -i "$WAN" -j DROP

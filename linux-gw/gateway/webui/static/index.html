@@ -109,16 +109,25 @@
                 <div class="kpi-top"><span class="kpi-label"><span data-ic="bug"></span>Заблокировано IP <span class="seg-q" title="Адреса, с которых выполнялся подбор пароля — система заблокировала их в межсетевом экране. Блокируются только публичные адреса; локальная сеть и VPN не затрагиваются.">?</span></span></div>
                 <div class="sec-big" id="sec-banned">0</div>
             </div>
-            <div class="kpi" data-accent="blue">
-                <div class="kpi-top"><span class="kpi-label"><span data-ic="lock"></span>Отбито с интернета <span class="seg-q" title="Пакеты, которые фаервол сбросил со стороны WAN — попытки достучаться до шлюза снаружи.">?</span></span></div>
+            <div class="kpi sec-click" data-accent="blue" onclick="secEvents('wan')" title="Нажми — журнал: кто, когда и куда стучался">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="lock"></span>Отбито с интернета <span class="seg-q" title="Попытки снаружи достучаться до САМОГО шлюза (панель, SSH и т.п.), которые фаервол отбросил, — за последние 7 дней. Служебный шум сети провайдера (multicast/broadcast) не считается. Интернет устройств в офисе это не затрагивает. Нажми на плитку — журнал.">?</span></span></div>
                 <div class="sec-big" id="sec-drops">0</div>
             </div>
-            <div class="kpi" data-accent="purple">
-                <div class="kpi-top"><span class="kpi-label"><span data-ic="user"></span>Неудачных входов <span class="seg-q" title="Сколько раз неверно вводили логин/пароль в панель.">?</span></span></div>
+            <div class="kpi sec-click" data-accent="purple" onclick="secEvents('logins')" title="Нажми — журнал: откуда и под каким логином">
+                <div class="kpi-top"><span class="kpi-label"><span data-ic="user"></span>Неудачных входов <span class="seg-q" title="Сколько раз неверно вводили логин или пароль в панель (всего по журналу). Нажми на плитку — откуда (офис, VPN, интернет), когда и под каким логином, включая попытки по SSH.">?</span></span></div>
                 <div class="sec-big" id="sec-fails">0</div>
             </div>
         </div>
         <div id="sec-banned-list" class="sec-banned-list" style="display:none"></div>
+        <div id="sec-events" class="card sec-events" style="display:none">
+            <h3><span data-ic="list"></span><span id="sec-ev-title">Журнал безопасности</span>
+                <button class="mini" style="margin-left:auto" onclick="$('sec-events').style.display='none'"><span data-ic="cross"></span></button></h3>
+            <div class="btns" style="margin-bottom:.5rem">
+                <button class="mini" id="sec-ev-tab-wan" onclick="secEvents('wan')">Отбито с интернета</button>
+                <button class="mini" id="sec-ev-tab-logins" onclick="secEvents('logins')">Неудачные входы</button>
+            </div>
+            <div id="sec-ev-body" class="small"></div>
+        </div>
     </section>
 
     <!-- ══ Сеть (интерфейсы · подключённые · DHCP/VLAN) ══ -->

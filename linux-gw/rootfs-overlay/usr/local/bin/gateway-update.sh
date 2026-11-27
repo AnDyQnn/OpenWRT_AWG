@@ -391,6 +391,8 @@ do_apply(){
     # включает (запускать весь список нельзя — там установщик). Перезапускаем
     # поимённо, иначе новый код заработал бы лишь после ребута.
     systemctl restart gw-qos.service >/dev/null 2>&1 || true
+    # Устойчивость WAN к морганиям кабеля (dhcpcd: noipv4ll + nolink на WAN).
+    [ -x /usr/local/bin/gateway-dhcpcd-tune.sh ] && /usr/local/bin/gateway-dhcpcd-tune.sh --apply-live >/dev/null 2>&1 || true
 
     # Подчищаем осиротевшие переименованные контейнеры (<hex>_gw-*). Docker так
     # переименовывает контейнер, который не смог удалить при пересоздании — это

@@ -675,3 +675,8 @@ button .ico, .btn .ico { margin-right: 0.32em; vertical-align: -0.15em; }
     .brand { font-size: 0.95rem; }
     .login-box { padding: 1.8rem 1.3rem; }
 }
+
+.sec-click { cursor: pointer; }
+.sec-click:hover { transform: translateY(-2px); }
+.sec-events { margin: -.4rem 0 1.1rem; }
+.sec-events table { width: 100%; }

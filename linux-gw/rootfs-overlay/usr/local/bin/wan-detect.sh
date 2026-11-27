@@ -133,6 +133,10 @@ apply_config() {
     # Хостовый фаервол на вход (С2): закрыть шлюз со стороны WAN. Вызываем после
     # того, как WAN определён и NAT настроен. Идемпотентно.
     /usr/local/bin/gw-firewall.sh 2>/dev/null || true
+
+    # Короткие моргания кабеля WAN не должны рвать интернет на ~8 с (dhcpcd сносил
+    # маршруты и ставил ложный default через порт моста). Идемпотентно.
+    [ -x /usr/local/bin/gateway-dhcpcd-tune.sh ] && /usr/local/bin/gateway-dhcpcd-tune.sh "$wan" --apply-live 2>/dev/null || true
 }
 
 main() {
