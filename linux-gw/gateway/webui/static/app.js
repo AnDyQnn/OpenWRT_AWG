@@ -1489,17 +1489,20 @@ function _nlRender() {
         // у каждой половины своя шкала (линии не налезают друг на друга).
         const MID = Math.round((TOP + PH) / 2);
         const scaleFor = dir => {
-            const allV = [];
-            vis.filter(q => q.dir === dir).forEach(q => pts(q).forEach(p => { if (p[1] > 0) allV.push(p[1]); }));
-            allV.sort((a, b) => a - b);
-            const vmax = allV.length ? allV[allV.length - 1] : 0;
-            const p98 = allV.length ? allV[Math.floor(0.98 * (allV.length - 1))] : 0;
-            let mx = vmax <= p98 * 1.35 ? vmax : p98;      // нет выбросов — весь диапазон
-            // замер интернетометра — в шкалу, только если не улетает далеко выше трафика
-            sts.forEach(x => { const v = dir === 'dn' ? x.down : x.up; if (v && v <= Math.max(mx, 0.005) * 1.6) mx = Math.max(mx, v); });
-            mx = Math.max(mx, 0.005);                       // от 5 Кбит/с — и ночной простой читаем
-            const step = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find(x => mx * 1.12 / x <= 2) || 2000;
-            return { step, top: Math.ceil(mx * 1.12 / step) * step };
+            const v = [];
+            vis.filter(q => q.dir === dir).forEach(q => pts(q).forEach(p => { if (p[1] > 0) v.push(p[1]); }));
+            v.sort((a, b) => a - b);
+            const n = v.length, vmax = n ? v[n - 1] : 0;
+            // обычный максимум: 95-й перцентиль; если самый большой не сильно выше — берём его
+            const p95 = n ? v[Math.floor(0.95 * (n - 1))] : 0;
+            let mx = n < 8 || vmax <= p95 * 1.5 ? vmax : p95;
+            sts.forEach(x => { const s = dir === 'dn' ? x.down : x.up; if (s && s <= Math.max(mx, 0.005) * 1.6) mx = Math.max(mx, s); });
+            mx = Math.max(mx, 0.005) * 1.08;                // от 5 Кбит/с; чуть воздуха над пиком
+            // верх — ближайшее «круглое» число (1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8 ×10ⁿ),
+            // а не целый шаг сетки: иначе при пике 110 шкала прыгала до 200
+            const e = Math.pow(10, Math.floor(Math.log10(mx)));
+            const top = [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].map(m => m * e).find(t => t >= mx - 1e-12);
+            return { step: top / 2, top };
         };
         const SC = { up: scaleFor('up'), dn: scaleFor('dn') };
         const topV = SC.dn.top;
@@ -1507,7 +1510,7 @@ function _nlRender() {
             ? MID - Math.min(v, SC.up.top) / SC.up.top * (MID - TOP)
             : MID + Math.min(v, SC.dn.top) / SC.dn.top * (PH - MID);
         // числа шкалы — в единице своей половины (она подписана у оси: Кбит/с или Мбит/с)
-        const fmtN = (v, dir) => SC[dir].top < 1 ? String(Math.round(v * 1000)) : v >= 10 ? v.toFixed(0) : (+v.toFixed(1)).toString();
+        const fmtN = (v, dir) => SC[dir].top < 1 ? String(Math.round(v * 1000)) : v >= 10 ? v.toFixed(0) : (+v.toFixed(2)).toString();
         const fmtR = v => v >= 1 ? `${(+v.toFixed(1))} Мбит/с` : `${Math.round(v * 1000)} Кбит/с`;
 
         // ── внештатные события — полупрозрачные полосы ПОВЕРХ графика с подписью сверху ──
@@ -1642,10 +1645,12 @@ function _nlRender() {
             const over = o.v > SC[o.dir].top, up = o.dir === 'up';
             const txt = (over ? (up ? '▲ ' : '▼ ') : '') + fmtR(o.v), w = txt.length * 6.2 + 10;
             const ty = up ? (over ? TOP + 12 : Y(o.v, 'up') - 9) : (over ? PH - 6 : Y(o.v, 'dn') + 17);
-            if (ty < TOP + 4 || ty > PH || o.x < LM + w / 2 || o.x > LM + PW - w / 2 || placed.some(p => Math.abs(p.x - o.x) < (w + p.w) / 2 + 4 && Math.abs(p.y - ty) < 16)) return;
-            placed.push({ x: o.x, y: ty, w });
-            sv += `<g pointer-events="none"><rect x="${(o.x - w / 2).toFixed(1)}" y="${(ty - 10).toFixed(1)}" width="${w}" height="14" rx="3" fill="#0d1117" stroke="${o.c}" stroke-opacity=".7"/>
-                <text x="${o.x.toFixed(1)}" y="${(ty + 0.5).toFixed(1)}" fill="#e6edf3" font-size="10.5" font-weight="600" text-anchor="middle">${txt}</text></g>`;
+            // у края — сдвигаем подпись внутрь графика, а не прячем
+            const lx = Math.min(Math.max(o.x, LM + w / 2 + 2), LM + PW - w / 2 - 2);
+            if (ty < TOP + 4 || ty > PH || placed.some(p => Math.abs(p.x - lx) < (w + p.w) / 2 + 4 && Math.abs(p.y - ty) < 16)) return;
+            placed.push({ x: lx, y: ty, w });
+            sv += `<g pointer-events="none"><rect x="${(lx - w / 2).toFixed(1)}" y="${(ty - 10).toFixed(1)}" width="${w}" height="14" rx="3" fill="#0d1117" stroke="${o.c}" stroke-opacity=".7"/>
+                <text x="${lx.toFixed(1)}" y="${(ty + 0.5).toFixed(1)}" fill="#e6edf3" font-size="10.5" font-weight="600" text-anchor="middle">${txt}</text></g>`;
         });
         const covFrom = met && met.data_from ? met.data_from * 1000 : null;
         if (met && covFrom && (t1 - covFrom) < span * 0.15 && _nlDays > 1 && !cropX) {
