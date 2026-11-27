@@ -8,6 +8,7 @@ document.querySelectorAll('.topbar nav a[data-tab]').forEach(a => {
         document.getElementById('tab-' + a.dataset.tab).classList.add('active');
         document.querySelector('.topbar nav').classList.remove('show');
         if (a.dataset.tab === 'docs' && !_docsLoaded) { _docsLoaded = true; loadDoc('README.md'); }
+        if (a.dataset.tab === 'logs') loadNetlog();
     });
 });
 document.getElementById('nav-toggle').addEventListener('click', () => {
@@ -818,6 +819,148 @@ async function loadDevices() {
     });
     _prevDev = cur;
 }
+
+// ── Журнал сети: отвалы линка по каждому порту ──
+let _nlDays = 7, _nlData = null, _nlFilter = '';
+const _NL_ROLE = { WAN: 'WAN — к провайдеру', LAN: 'LAN — в офис', VPN: 'VPN-туннель', '': 'порт' };
+const _NL_STATE = { up: 'линк есть', slow: 'пониженная скорость', down: 'линка нет', idle: 'туннель не работал', off: 'шлюз выключен или нет данных' };
+function _nlDur(s) {
+    s = Math.max(0, Math.round(s || 0));
+    if (s < 60) return s + ' с';
+    if (s < 3600) return Math.floor(s / 60) + ' мин' + (s % 60 ? ' ' + (s % 60) + ' с' : '');
+    if (s < 86400) return Math.floor(s / 3600) + ' ч ' + Math.floor(s % 3600 / 60) + ' мин';
+    return Math.floor(s / 86400) + ' д ' + Math.floor(s % 86400 / 3600) + ' ч';
+}
+const _nlT = iso => new Date(iso.replace(' ', 'T')).getTime();
+function _nlFmt(ms, withSec) {
+    const d = new Date(ms), p = n => String(n).padStart(2, '0');
+    return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}` + (withSec ? ':' + p(d.getSeconds()) : '');
+}
+async function loadNetlog(days) {
+    if (days) _nlDays = days;
+    document.querySelectorAll('[data-nld]').forEach(b => b.classList.toggle('success', +b.dataset.nld === _nlDays));
+    const body = $('nl-body'); if (!body) return;
+    if (!_nlData || days) body.textContent = 'Загружаю…';
+    const d = await api('/api/netlog?days=' + _nlDays);
+    if (!d || d.error) { body.textContent = (d && d.error) || 'Не удалось получить журнал'; return; }
+    _nlData = d; _nlRender();
+}
+function _nlRender() {
+    const d = _nlData, body = $('nl-body'); if (!d || !body) return;
+    const t0 = _nlT(d.since), t1 = _nlT(d.now), span = Math.max(1, t1 - t0);
+    const X = t => Math.min(1000, Math.max(0, (t - t0) / span * 1000));
+    const nT = 6, ticks = [];
+    for (let i = 0; i <= nT; i++) {
+        const t = t0 + span * i / nT;
+        ticks.push(`<span style="left:${i / nT * 100}%">${_nlDays <= 1 ? _nlFmt(t).slice(6) : _nlFmt(t).slice(0, 5)}</span>`);
+    }
+    const axis = `<div class="nl-axis">${ticks.join('')}</div>`;
+    // корзины для столбиков: до 2 суток — по часу, иначе по дню
+    const hourly = _nlDays <= 2, bucketMs = hourly ? 3600e3 : 86400e3;
+    const startB = hourly ? Math.floor(t0 / bucketMs) * bucketMs : new Date(new Date(t0).toDateString()).getTime();
+    const nB = Math.max(1, Math.ceil((t1 - startB) / bucketMs));
+    let h = '';
+    if (!d.ifaces.length) h = '<div>Нет данных о портах.</div>';
+    d.ifaces.forEach((f, idx) => {
+        const st = f.up ? (f.full_speed && f.speed && f.speed < f.full_speed ? 'warn' : 'ok') : 'bad';
+        const now = f.role === 'VPN' ? (f.up ? 'туннель поднят' : 'туннель не поднят') : f.up ? (f.speed ? `${f.speed} Мбит/с` : 'линк есть') : 'линка нет';
+        const chips = [];
+        chips.push(`<span class="nl-chip ${f.drops ? (f.drops > 5 ? 'bad' : 'warn') : 'ok'}">${GWFX.ic(f.drops ? 'warn' : 'check')} ${f.role === 'VPN' ? 'пропаданий/перезапусков' : 'отвалов'}: <b>${f.drops}</b>${f.drops ? ` (до 5 с: ${f.drops_short})` : ''}</span>`);
+        if (f.down_s) chips.push(`<span class="nl-chip">${f.role === 'VPN' ? 'туннеля не было' : 'без линка'} всего: <b>${_nlDur(f.down_s)}</b></span>`);
+        if (f.slow_s) chips.push(`<span class="nl-chip warn">${GWFX.ic('warn')} на пониженной скорости: <b>${_nlDur(f.slow_s)}</b> (${f.slow_events} раз)</span>`);
+        // полоса состояния: сначала «фон», сверху — узкие отвалы с минимальной шириной
+        const ord = { up: 0, idle: 1, off: 2, slow: 3, down: 4 };
+        const rects = f.segments.slice().sort((a, b) => ord[a.state] - ord[b.state]).map(s => {
+            const x = X(_nlT(s.from)), w = Math.max(X(_nlT(s.to)) - x, s.state === 'up' ? 0 : 1.6);
+            return `<rect class="nl-${s.state}" x="${x.toFixed(2)}" y="0" width="${w.toFixed(2)}" height="24"/>`;
+        }).join('');
+        const cnt = new Array(nB).fill(0);
+        if (hourly) f.events.forEach(e => {
+            if (e.kind === 'drop' || e.kind === 'drop_open') { const b = Math.floor((_nlT(e.ts) - startB) / bucketMs); if (b >= 0 && b < nB) cnt[b]++; }
+        });
+        else Object.entries(f.per_day).forEach(([day, c]) => {
+            const b = Math.round((new Date(day + 'T00:00:00').getTime() - startB) / bucketMs); if (b >= 0 && b < nB) cnt[b] += c;
+        });
+        // столбики на той же оси времени, что и полоса над ними
+        const mx = Math.max(1, ...cnt);
+        const bars = cnt.map((c, i) => {
+            if (!c) return '';
+            const xa = X(startB + i * bucketMs), xb = X(startB + (i + 1) * bucketMs), gap = Math.min(2, (xb - xa) * 0.3);
+            return `<rect class="nl-bar" x="${(xa + gap / 2).toFixed(2)}" y="${(40 - c / mx * 38).toFixed(2)}" width="${Math.max(0.8, xb - xa - gap).toFixed(2)}" height="${(c / mx * 38).toFixed(2)}" data-b="${i}" data-c="${c}"/>`;
+        }).join('');
+        h += `<div class="nl-if">
+            <div class="nl-head"><span class="dot ${st}"></span><b>${_esc(f.name)}</b>
+                <span class="nl-role nl-role-${(f.role || 'x').toLowerCase()}">${_esc(_NL_ROLE[f.role] || 'порт')}</span>
+                <span class="small">сейчас: ${_esc(now)}${f.full_speed ? ` · норма ${f.full_speed} Мбит/с` : ''}</span></div>
+            <div class="nl-chips">${chips.join('')}</div>
+            <svg class="nl-strip" data-i="${idx}" viewBox="0 0 1000 24" preserveAspectRatio="none" role="img" aria-label="Состояние линка ${_esc(f.name)} за период">${rects}</svg>
+            ${axis}
+            ${f.drops ? `<div class="small nl-sub">Отвалов за ${hourly ? 'час' : 'день'} (максимум ${mx}):</div>
+            <svg class="nl-bars" data-i="${idx}" viewBox="0 0 1000 40" preserveAspectRatio="none" role="img" aria-label="Отвалы ${_esc(f.name)} по ${hourly ? 'часам' : 'дням'}"><line x1="0" y1="40" x2="1000" y2="40" class="nl-base"/>${bars}</svg>` : ''}
+        </div>`;
+    });
+    // таблица событий
+    const kinds = { drop: 'отвал линка', drop_open: 'линк пропал и пока не вернулся', slow_boot: 'после загрузки поднялся на пониженной скорости',
+        boot: 'загрузка шлюза', idle: 'туннель не работал (VPN выключен)' };
+    let rows = [];
+    d.ifaces.forEach(f => f.events.forEach(e => { if (e.kind !== 'boot' && e.kind !== 'shutdown') rows.push({ ...e, f }); }));
+    const seen = new Set();
+    d.ifaces.forEach(f => f.events.forEach(e => { if (e.kind === 'boot' && !seen.has(e.ts)) { seen.add(e.ts); rows.push({ ...e, f: null }); } }));
+    rows = rows.filter(r => !_nlFilter || !r.f || r.f.name === _nlFilter).sort((a, b) => (b.ts < a.ts ? -1 : 1)).slice(0, 300);
+    const opts = ['<option value="">все порты</option>'].concat(d.ifaces.map(f =>
+        `<option value="${_esc(f.name)}"${_nlFilter === f.name ? ' selected' : ''}>${_esc(f.name)} (${_esc(f.role || 'порт')})</option>`)).join('');
+    h += `<div class="nl-tbl-head"><b>События</b> <select onchange="_nlFilter=this.value;_nlRender()">${opts}</select>
+        <span class="small">загрузок шлюза за период: ${d.boots}</span></div>`;
+    if (!rows.some(r => r.f)) h += `<div class="sec-line ok">${GWFX.ic('check')} За выбранный период отвалов не было.</div>`;
+    if (rows.length) h += `<div class="nl-tbl"><table><thead><tr><th>Время</th><th>Порт</th><th>Событие</th><th>Длительность</th><th>Скорость после</th></tr></thead><tbody>` +
+        rows.map(r => {
+            const slow = r.f && r.f.full_speed && r.speed && r.speed < r.f.full_speed;
+            const bad = r.kind === 'drop' || r.kind === 'drop_open';
+            const cls = r.kind === 'boot' || r.kind === 'idle' ? 'nl-row-muted' : '';
+            return `<tr class="${cls}"><td>${_esc(r.ts.slice(8, 10) + '.' + r.ts.slice(5, 7) + '.' + r.ts.slice(0, 4) + ' ' + r.ts.slice(11))}</td>
+                <td>${r.f ? `${_esc(r.f.name)} <span class="small">${_esc(r.f.role)}</span>` : '—'}</td>
+                <td>${bad ? '<span style="color:var(--bad)">●</span> ' : ''}${_esc(r.f && r.f.role === 'VPN' && bad ? (r.dur <= 3 ? 'туннель перезапущен' : 'туннель пропадал') : (kinds[r.kind] || r.kind))}</td>
+                <td>${r.dur != null ? _esc(_nlDur(r.dur)) : ''}</td>
+                <td>${r.speed ? (slow ? `<b style="color:var(--warn)">${GWFX.ic('warn')} ${r.speed} Мбит/с</b>` : `${r.speed} Мбит/с`) : ''}</td></tr>`;
+        }).join('') + `</tbody></table></div>`;
+    body.innerHTML = h;
+    GWFX.icons(body);
+    // подсказки при наведении
+    const tip = $('nl-tip'), card = $('netlog-card');
+    const show = (ev, html) => {
+        tip.innerHTML = html; tip.style.display = '';
+        const r = card.getBoundingClientRect();
+        let x = ev.clientX - r.left + 14; const y = ev.clientY - r.top + 14;
+        if (x + tip.offsetWidth > r.width - 8) x = ev.clientX - r.left - tip.offsetWidth - 14;
+        tip.style.left = Math.max(4, x) + 'px'; tip.style.top = y + 'px';
+    };
+    const hide = () => { tip.style.display = 'none'; };
+    body.querySelectorAll('svg.nl-strip').forEach(svg => {
+        const f = d.ifaces[+svg.dataset.i];
+        svg.addEventListener('mousemove', ev => {
+            const r = svg.getBoundingClientRect(), px = ev.clientX - r.left;
+            const t = t0 + px / r.width * span, tol = 4 / r.width * span;
+            // приоритет — узкие «плохие» участки рядом с курсором (иначе в них не попасть)
+            let s = f.segments.find(s => (s.state === 'down' || s.state === 'slow') && _nlT(s.from) - tol <= t && t <= _nlT(s.to) + tol);
+            if (!s) s = f.segments.find(s => _nlT(s.from) <= t && t <= _nlT(s.to));
+            if (!s) return hide();
+            const a = _nlT(s.from), b = _nlT(s.to);
+            const sn = f.role === 'VPN' && s.state === 'up' ? 'туннель работает' : f.role === 'VPN' && s.state === 'down' ? 'туннель не поднят' : _NL_STATE[s.state];
+            show(ev, `<b>${_esc(f.name)}</b> · ${_esc(sn)}${s.speed ? ` · ${s.speed} Мбит/с` : ''}<br>${_nlFmt(a, true)} — ${_nlFmt(b, true)}<br>длительность: ${_nlDur((b - a) / 1000)}`);
+        });
+        svg.addEventListener('mouseleave', hide);
+    });
+    body.querySelectorAll('svg.nl-bars').forEach(svg => {
+        const f = d.ifaces[+svg.dataset.i];
+        svg.addEventListener('mousemove', ev => {
+            const r = svg.getBoundingClientRect(), t = t0 + (ev.clientX - r.left) / r.width * span, i = Math.floor((t - startB) / bucketMs);
+            const a = startB + i * bucketMs, c = svg.querySelector(`rect[data-b="${i}"]`);
+            show(ev, `<b>${_esc(f.name)}</b> · ${hourly ? _nlFmt(a) + '–' + _nlFmt(a + bucketMs).slice(6) : _nlFmt(a).slice(0, 5)}<br>отвалов: <b>${c ? c.dataset.c : 0}</b>`);
+        });
+        svg.addEventListener('mouseleave', hide);
+    });
+}
+setInterval(() => { const t = $('tab-logs'); if (t && t.classList.contains('active')) loadNetlog(); }, 60000);
 
 // ── Логи ──
 async function loadLogs() {

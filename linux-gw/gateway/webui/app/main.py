@@ -772,6 +772,222 @@ def security_events(request: Request):
             "logins": logins[-50:][::-1], "logins_total": len(logins)}
 
 
+# ── Журнал сети: отвалы линка по каждому интерфейсу ─────────────
+# Источник — журнал ядра (драйвер пишет «Link is Up/Down» и скорость
+# согласования) + dhcpcd для туннеля awg0 + список загрузок (когда шлюз был
+# выключен). Ничего не храним сами: journald на шлюзе persistent, история
+# месяцами. Пример, ради которого это сделано: у шлюза в офисе WAN-порт
+# моргал по ~2 с и неделями «застревал» на 10 Мбит/с вместо 100 — без этого
+# журнала такое видно только руками по journalctl.
+_LINK_RE = re.compile(r"(?:^|\s)([A-Za-z][\w.-]*?):?\s+(?:NIC\s+)?[Ll]ink(?:\s+is)?\s+(Up|Down|up|down)\b")
+_SPEED_RE = re.compile(r"(\d+)\s*([MG])bps")
+_TS_RE = re.compile(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)")
+_NETLOG_CACHE: dict = {}
+
+
+def _netlog_ts(s: str):
+    import datetime as _dt
+    return _dt.datetime.fromisoformat(s)
+
+
+def _netlog_build(days: int) -> dict:
+    import datetime as _dt
+    sep = "@@GWSEP@@"
+    out = _host_sh(
+        f"journalctl _TRANSPORT=kernel --no-pager -o short-iso --since '-{days} days' 2>/dev/null"
+        " | grep -E '[Ll]ink (is )?(Up|Down|up|down)' | grep -v -E 'GW_FW|martian' | tail -n 8000;"
+        f" echo {sep};"
+        f" journalctl _COMM=dhcpcd --no-pager -o short-iso --since '-{days} days' 2>/dev/null"
+        " | grep -E 'awg[0-9]*: (carrier (lost|acquired)|removing interface|using static address)' | tail -n 8000;"
+        f" echo {sep}; journalctl --list-boots --no-pager 2>/dev/null | tail -n 400", timeout=45)
+    parts = out.split(sep)
+    kern, dh, bl = (parts + ["", "", ""])[:3]
+    now = _dt.datetime.now().replace(microsecond=0)
+    since = now - _dt.timedelta(days=days)
+
+    ev = []  # (ts, iface, 'up'|'down', speed)
+    for l in kern.splitlines():
+        m = _TS_RE.match(l)
+        if not m:
+            continue
+        body = l.split(" kernel: ", 1)[-1]
+        lm = _LINK_RE.search(body)
+        if not lm:
+            continue
+        name = lm.group(1)
+        # только сетевые интерфейсы: «ata1: SATA link up» и т.п. — не наше
+        if name.startswith(("veth", "docker", "br-")) or name == "lo" or not (
+                os.path.exists(f"/sys/class/net/{name}")
+                or re.match(r"^(en|eth|wl|ww|usb|lan|wan)[\w.-]*$", name)):
+            continue
+        sp = None
+        if lm.group(2).lower() == "up":
+            s = _SPEED_RE.search(body)
+            if s:
+                sp = int(s.group(1)) * (1000 if s.group(2) == "G" else 1)
+        ev.append((_netlog_ts(m.group(1)), name, lm.group(2).lower(), sp))
+    for l in dh.splitlines():
+        m = _TS_RE.match(l)
+        # туннель: интерфейс удалён/потерял carrier = down; поднят (адрес
+        # назначен) = up. «carrier acquired» пишется не всегда (новый демон
+        # после рестарта видит awg0 уже поднятым), поэтому ловим и адрес.
+        dm = re.search(r"(awg\d*): (carrier lost|carrier acquired|removing interface|using static address)", l)
+        if m and dm:
+            ev.append((_netlog_ts(m.group(1)), dm.group(1),
+                       "down" if dm.group(2) in ("carrier lost", "removing interface") else "up", None))
+
+    boots = []
+    for l in bl.splitlines():
+        d = re.findall(r"(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)", l)
+        if len(d) >= 2:
+            boots.append((_dt.datetime.fromisoformat(d[0]), _dt.datetime.fromisoformat(d[1])))
+    boots.sort()
+    off = []
+    for a, b in zip(boots, boots[1:]):
+        if b[0] > since and (b[0] - a[1]).total_seconds() > 30:
+            off.append((max(a[1], since), b[0]))
+    boot_starts = [b[0] for b in boots if b[0] > since]
+
+    wan = _read("/run/awg-setup/wan-port") or _read("/etc/awg-setup/wan-port")
+    try:
+        lan_ports = set(os.listdir("/sys/class/net/br-lan/brif"))
+    except Exception:
+        lan_ports = set()
+    names = {e[1] for e in ev} | ({wan} if wan else set()) | lan_ports
+    if os.path.exists("/sys/class/net/awg0"):
+        names.add("awg0")
+    names = {n for n in names if os.path.exists(f"/sys/class/net/{n}") or any(e[1] == n for e in ev)}
+
+    def role(n):
+        if n == wan:
+            return "WAN"
+        if n in lan_ports or n == "br-lan":
+            return "LAN"
+        if n.startswith("awg"):
+            return "VPN"
+        return ""
+
+    def cur(n):
+        if n.startswith("awg"):          # у туннеля нет «скорости линка» (ядро пишет 10)
+            return os.path.exists(f"/sys/class/net/{n}"), None
+        try:
+            carrier = Path(f"/sys/class/net/{n}/carrier").read_text().strip() == "1"
+        except Exception:
+            carrier = False
+        try:
+            sp = int(Path(f"/sys/class/net/{n}/speed").read_text().strip())
+            sp = sp if sp > 0 else None
+        except Exception:
+            sp = None
+        return carrier, sp
+
+    res = []
+    order = {"WAN": 0, "LAN": 1, "VPN": 2, "": 3}
+    for n in sorted(names, key=lambda x: (order[role(x)], x)):
+        carrier, cur_sp = cur(n)
+        mine = sorted([e for e in ev if e[1] == n], key=lambda e: e[0])
+        speeds = [e[3] for e in mine if e[3]] + ([cur_sp] if cur_sp else [])
+        full = max(speeds) if speeds else None
+        # единая лента событий: линк + загрузки шлюза
+        tl = [(e[0], e[2], e[3]) for e in mine] + [(b, "boot", None) for b in boot_starts]
+        tl.sort(key=lambda x: (x[0], 0 if x[1] == "boot" else 1))
+        segs, events = [], []
+        # журнал начинается с первой загрузки: раньше неё данных нет (шлюза ещё
+        # не было или журнал ротирован) — показываем как «шлюз выключен»
+        st = "off" if boots and boots[0][0] > since else "up"
+        st_sp, st_t = (None if st == "off" else full), since
+        pend = None
+
+        def push(to, s=None, sp=None):
+            nonlocal st_t
+            if to > st_t:
+                if segs and segs[-1]["state"] == (s or st) and segs[-1]["speed"] == sp:
+                    segs[-1]["to"] = to.isoformat()
+                else:
+                    segs.append({"from": st_t.isoformat(), "to": to.isoformat(), "state": s or st, "speed": sp})
+            st_t = to
+
+        for t, k, sp in tl:
+            if t < since:
+                continue
+            if k == "boot":
+                if pend is not None:
+                    events.append({"ts": pend.isoformat(sep=" "), "kind": "shutdown", "dur": None, "speed": None})
+                    pend = None
+                o = next((x for x in off if x[1] == t), None)
+                if o:
+                    push(o[0], st, st_sp if st != "down" else None)
+                    push(t, "off", None)
+                else:
+                    push(t, st, st_sp if st != "down" else None)
+                events.append({"ts": t.isoformat(sep=" "), "kind": "boot", "dur": None, "speed": None})
+                # после загрузки считаем линк поднятым: не каждый драйвер/демон
+                # пишет «Up» при старте, а несколько секунд загрузки — не отвал
+                st, st_sp = "up", full
+                continue
+            if k == "down":
+                push(t, st, st_sp if st != "down" else None)
+                if st != "down":
+                    pend = t
+                st, st_sp = "down", None
+            else:
+                push(t, st, st_sp if st != "down" else None)
+                if pend is not None:
+                    events.append({"ts": pend.isoformat(sep=" "), "kind": "drop",
+                                   "dur": round((t - pend).total_seconds()), "speed": sp})
+                    pend = None
+                elif full and sp and sp < full:
+                    events.append({"ts": t.isoformat(sep=" "), "kind": "slow_boot", "dur": None, "speed": sp})
+                st, st_sp = "up", sp if sp else (st_sp or full)
+        if pend is not None:
+            events.append({"ts": pend.isoformat(sep=" "), "kind": "drop_open",
+                           "dur": round((now - pend).total_seconds()), "speed": None})
+        push(now, st, st_sp if st != "down" else None)
+        for s in segs:
+            if s["state"] == "up" and full and s["speed"] and s["speed"] < full:
+                s["state"] = "slow"
+        if role(n) == "VPN":
+            # туннель часами «лежит», когда VPN выключен в панели/режим off —
+            # это не отвал. Отвалом считаем только короткие (≤10 мин) пропажи.
+            for s in segs:
+                if s["state"] == "down" and (_netlog_ts(s["to"]) - _netlog_ts(s["from"])).total_seconds() > 600:
+                    s["state"] = "idle"
+            for e in events:
+                if e["kind"] in ("drop", "drop_open") and (e["dur"] or 0) > 600:
+                    e["kind"] = "idle"
+        drops = [e for e in events if e["kind"] in ("drop", "drop_open")]
+        sec = lambda s: (_netlog_ts(s["to"]) - _netlog_ts(s["from"])).total_seconds()
+        per_day: dict = {}
+        for e in drops:
+            per_day[e["ts"][:10]] = per_day.get(e["ts"][:10], 0) + 1
+        res.append({
+            "name": n, "role": role(n), "up": carrier, "speed": cur_sp, "full_speed": full,
+            "drops": len(drops),
+            "drops_short": sum(1 for e in drops if (e["dur"] or 0) <= 5),
+            "down_s": round(sum(sec(s) for s in segs if s["state"] == "down")),
+            "slow_s": round(sum(sec(s) for s in segs if s["state"] == "slow")),
+            "slow_events": sum(1 for e in events if e["speed"] and full and e["speed"] < full),
+            "segments": segs, "events": events[-400:][::-1], "per_day": per_day,
+        })
+    return {"days": days, "since": since.isoformat(), "now": now.isoformat(),
+            "boots": len(boot_starts), "off": [{"from": a.isoformat(), "to": b.isoformat()} for a, b in off],
+            "ifaces": res}
+
+
+@app.get("/api/netlog")
+def api_netlog(days: int = 7):
+    days = max(1, min(int(days or 7), 365))
+    c = _NETLOG_CACHE.get(days)
+    if c and time.time() - c[0] < 60:
+        return c[1]
+    try:
+        v = _netlog_build(days)
+    except Exception as e:
+        return JSONResponse({"error": f"не удалось прочитать журнал: {e}"}, status_code=500)
+    _NETLOG_CACHE[days] = (time.time(), v)
+    return v
+
+
 class UnbanReq(BaseModel):
     ip: str = ""
 

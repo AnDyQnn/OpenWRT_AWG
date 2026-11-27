@@ -366,6 +366,30 @@
                 <div class="metric"><span>Сформирован</span><b id="rep-generated">—</b></div>
             </div>
         </div>
+        <div class="card" id="netlog-card">
+            <h3><span data-ic="split"></span>Журнал сети — отвалы линка по портам
+                <button class="mini" onclick="loadNetlog()" title="Обновить"><span data-ic="refresh"></span></button></h3>
+            <p class="small">Каждый раз, когда порт теряет сигнал в кабеле («линк»), и с какой скоростью он
+                поднимается обратно. Короткие частые отвалы и подъём на <b>10 Мбит/с вместо 100</b> — почти
+                всегда кабель или разъём (либо порт на той стороне). Наведите на полосу — покажет подробности.</p>
+            <div class="nl-controls">
+                <span class="small">Период:</span>
+                <button class="mini" data-nld="1" onclick="loadNetlog(1)">сутки</button>
+                <button class="mini" data-nld="7" onclick="loadNetlog(7)">неделя</button>
+                <button class="mini" data-nld="30" onclick="loadNetlog(30)">месяц</button>
+                <button class="mini" data-nld="90" onclick="loadNetlog(90)">3 месяца</button>
+                <button class="mini" data-nld="365" onclick="loadNetlog(365)">год</button>
+            </div>
+            <div class="nl-legend small">
+                <span><i class="nl-sw nl-up"></i>линк есть, полная скорость</span>
+                <span><i class="nl-sw nl-slow"></i>линк на пониженной скорости</span>
+                <span><i class="nl-sw nl-down"></i>линка нет (отвал)</span>
+                <span><i class="nl-sw nl-idle"></i>туннель не работал (VPN выключен)</span>
+                <span><i class="nl-sw nl-off"></i>шлюз выключен / нет данных</span>
+            </div>
+            <div id="nl-body" class="small">Загружаю…</div>
+            <div id="nl-tip" class="nl-tip" style="display:none"></div>
+        </div>
         <div class="card">
             <h3>Журнал событий <button class="mini" onclick="loadLogs()"><span data-ic="refresh"></span></button></h3>
             <div class="small" style="margin-bottom:0.6rem">
