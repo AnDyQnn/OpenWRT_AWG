@@ -591,19 +591,50 @@ function _updRender(d) {
         avail.textContent = (st.state === 'ok' || st.stage === 'commit') ? 'актуально' : '—';
         btn.style.display = 'none';
     }
-    prog.innerHTML = _updProgressHtml(st, running);
-    _updLast = { st, running };
+    // Ждём финала ИМЕННО запущенного обновления: апдейтер первые секунды тянет
+    // манифест/свою копию и статус ещё «доступно» — раньше опрос на этом
+    // останавливался и статус «застревал» до перезагрузки страницы.
+    const tsMs = st.ts ? new Date(st.ts).getTime() : 0;
+    const terminal = (st.stage === 'commit' && st.state === 'ok') || (st.stage === 'rollback' && st.state !== 'running') || st.state === 'error';
+    const fresh = _updExpect && tsMs >= _updExpect - 3000;
+    if (_updExpect && terminal && fresh) {
+        const ok = st.stage === 'commit';
+        _updSetExpect(0);
+        if (ok) { toast(`Обновлено до ${st.to || ''} — перезагружаю панель…`, 'ok', 4000); setTimeout(() => location.reload(), 3500); }
+    } else if (_updExpect && Date.now() - _updExpect > 20 * 60e3) _updSetExpect(0);   // страховка
+    const waiting = _updExpect && !running && !(terminal && fresh);
+    prog.innerHTML = waiting
+        ? `<div class="upd-prog run"><div class="upd-prog-top"><b>Запускаю обновление…</b><span>${Math.round((Date.now() - _updExpect) / 1000)} с</span></div>
+            <div class="upd-bar"><i style="width:2%"></i></div><div class="upd-prog-msg">Шлюз скачивает манифест новой версии</div></div>`
+        : _updProgressHtml(st, running);
+    _updLast = { st, running: running || !!waiting };
     // если идёт накат — продолжаем опрашивать
-    if (running) _updStartPoll(); else _updStopPoll();
+    if (running || _updExpect) _updStartPoll(); else _updStopPoll();
+}
+// метка «я запустил обновление» — переживает перезагрузку страницы
+let _updExpect = 0;
+try { _updExpect = +(sessionStorage.getItem('gw-upd-expect') || 0); } catch (e) { _updExpect = 0; }
+function _updSetExpect(v) {
+    _updExpect = v;
+    try { v ? sessionStorage.setItem('gw-upd-expect', String(v)) : sessionStorage.removeItem('gw-upd-expect'); } catch (e) { /* приватный режим */ }
 }
 function _updStartPoll() {
     if (_updPollTimer) return;
     _updPollTimer = setInterval(loadUpdate, 2000);
 }
 function _updStopPoll() { if (_updPollTimer) { clearInterval(_updPollTimer); _updPollTimer = null; } }
+let _updBusy = false;
 async function loadUpdate() {
+    if (_updBusy) return;                         // предыдущий запрос ещё не ответил
+    _updBusy = true;
     let d = null;
-    try { d = await api('/api/update/status'); } catch (e) { d = null; }
+    // таймаут: пока панель перезапускается, запрос может повиснуть навсегда
+    const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 6000);
+    try {
+        const r = await fetch('/api/update/status', { signal: ctl.signal, cache: 'no-store' });
+        if (r.status === 401) { window.location.href = '/login'; return; }
+        d = await r.json();
+    } catch (e) { d = null; } finally { clearTimeout(tm); _updBusy = false; }
     if (!d && _updLast && _updLast.running) {
         // во время наката панель сама перезапускается — не теряем статус, ждём
         const note = $('upd-prog-note');
@@ -664,7 +695,7 @@ async function updateApply() {
     if (!ok) return;
     const r = await fetch('/api/update/apply', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ confirm: true }) });
     const d = await r.json();
-    if (d.ok) { toast('Обновление запущено…', 'warn', 6000); _updStartPoll(); setTimeout(loadUpdate, 2000); }
+    if (d.ok) { _updSetExpect(Date.now()); toast('Обновление запущено…', 'warn', 6000); _updStartPoll(); loadUpdate(); }
     else toast(d.error || 'ошибка', 'bad');
 }
 async function updateRollback() {
@@ -673,7 +704,7 @@ async function updateRollback() {
     const r = await fetch('/api/update/rollback', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ confirm: true }) });
     const d = await r.json();
     const res = $('upd-rollback-result');
-    if (d.ok) { if (res) res.textContent = 'Откат запущен…'; toast('Откат запущен…', 'warn', 6000); _updStartPoll(); }
+    if (d.ok) { _updSetExpect(Date.now()); if (res) res.textContent = 'Откат запущен…'; toast('Откат запущен…', 'warn', 6000); _updStartPoll(); }
     else { if (res) res.textContent = d.error || 'ошибка'; toast(d.error || 'ошибка', 'bad'); }
 }
 async function updateConfigSave() {
