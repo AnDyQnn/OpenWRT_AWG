@@ -1427,7 +1427,10 @@ function _nlRender() {
         const U = only ? 'd' + only.replace(/[^a-z0-9]/gi, '') : 'm';
         const onlyF = only ? d.ifaces.find(f => f.name === only) : null;
         const sts = (d.speedtests || []).filter(x => !onlyF || (onlyF.role === 'WAN' && x.path === 'direct') || (onlyF.role === 'VPN' && x.path === 'vpn'));
-        const LM = 34, W = Math.max(280, mainEl.clientWidth), PW = W - LM - 6;
+        // детальный график живёт в ячейке таблицы: ширину берём от самой таблицы портов,
+        // иначе SVG растягивает ячейку и таблица уезжает в горизонтальный скролл
+        const host = only && mainEl.closest('.nl-ports');
+        const LM = 34, W = Math.max(280, host ? host.clientWidth - 46 : mainEl.clientWidth), PW = W - LM - 6;
         const ROW = 15, NROWS = 3, BTOP = 4 + ROW * NROWS, TOP = BTOP + 10, H = only ? 230 : 300, PH = H - 24;
         const X = t => LM + (t - t0) / span * PW;
         const wanF = d.ifaces.find(f => f.role === 'WAN');

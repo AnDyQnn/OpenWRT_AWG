@@ -903,3 +903,14 @@ tr.nl-det > td { padding: 0 0.7rem 0.9rem; background: rgba(88,166,255,0.03); }
 .nl-det-chart { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.3rem 0.4rem 0; margin-bottom: 0.5rem; }
 .nl-dev { font-size: 0.78rem; }
 .nl-dev .nl-pr { grid-template-columns: 150px 120px 0 80px auto; }
+/* таблица портов не уезжает вбок: детализация по ширине таблицы */
+.nl-ports { overflow-x: hidden; overflow-y: visible; }
+.nl-ports table { table-layout: auto; width: 100%; }
+tr.nl-det > td { max-width: 0; overflow: hidden; }
+.nl-det-chart { overflow: hidden; }
+/* тёмные полосы прокрутки там, где они нужны (длинные списки) */
+.nl-tbl, .nl-ports, .nl-cal { scrollbar-width: thin; scrollbar-color: #30363d transparent; }
+.nl-tbl::-webkit-scrollbar { width: 8px; height: 8px; }
+.nl-tbl::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+.nl-tbl::-webkit-scrollbar-track { background: transparent; }
+@media (max-width: 760px) { .nl-ports { overflow-x: auto; } }
