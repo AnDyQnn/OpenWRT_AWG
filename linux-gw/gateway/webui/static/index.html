@@ -147,11 +147,51 @@
 
         <div class="card">
             <h3><span data-ic="monitor"></span>Подключённые устройства <span class="small">(аренды DHCP)</span></h3>
+            <div class="lease-row">
+                <span class="small">Срок аренды адреса:</span>
+                <input type="number" id="lease-val" min="1" max="999" step="1" style="width:5.5rem">
+                <select id="lease-unit" style="width:auto">
+                    <option value="m">минут</option><option value="h">часов</option>
+                    <option value="d">дней</option><option value="mo">месяцев</option>
+                </select>
+                <button class="mini" onclick="leaseSave()">Сохранить</button>
+                <span class="small" id="lease-cur"></span>
+            </div>
+            <p class="small lease-hint">Сколько устройство держит выданный адрес. <b>Длинный</b> срок (дни, месяцы) — у устройств
+                постоянные адреса, удобно для правил доступа. <b>Короткий</b> (минуты, часы) — адреса быстро освобождаются,
+                удобно, когда подключают много временных устройств (клиентские ПК на настройку). Новый срок устройство
+                получит при следующем продлении аренды или переподключении. Закреплённые за MAC адреса не меняются.</p>
             <table id="dev-table">
                 <thead><tr><th>IP</th><th>MAC</th><th>Имя</th><th>Скорость (сейчас)</th><th>Аренда до</th></tr></thead>
                 <tbody id="dev-body"></tbody>
             </table>
             <div id="dev-empty" class="small">Нет подключённых устройств</div>
+        </div>
+
+        <div class="card" id="st-card">
+            <div class="nl-top">
+                <h3><span data-ic="gauge"></span>Интернетометр</h3>
+                <span id="st-state" class="small"></span>
+            </div>
+            <p class="small">Скорость и пинг сразу через несколько сервисов — <b>Яндекс</b>, <b>2ip</b> и <b>Cloudflare</b> —
+                и по каждому каналу: <b>напрямую</b> через провайдера и <b>через VPN</b>. Меряет сам шлюз, поэтому видно
+                реальную скорость канала, без влияния Wi‑Fi и компьютера. Разные сервисы — разные серверы: если все
+                показывают мало, узкое место у провайдера или в кабеле; если мало только один — проблема на его стороне.</p>
+            <div class="st-opts">
+                <div><span class="small">Каналы:</span>
+                    <label class="st-chk"><input type="checkbox" id="st-p-direct" checked> напрямую <span id="st-wan" class="small"></span></label>
+                    <label class="st-chk"><input type="checkbox" id="st-p-vpn" checked> через VPN</label></div>
+                <div><span class="small">Сервисы:</span>
+                    <label class="st-chk"><input type="checkbox" id="st-s-yandex" checked> Яндекс</label>
+                    <label class="st-chk"><input type="checkbox" id="st-s-2ip" checked> 2ip</label>
+                    <label class="st-chk"><input type="checkbox" id="st-s-cloudflare" checked> Cloudflare</label></div>
+                <button class="success" id="st-run" onclick="stRun()"><span data-ic="gauge"></span>Запустить замер</button>
+            </div>
+            <p class="small st-warn">Каждый замер ≈ 20 с; пока идёт, интернет в офисе заметно занят. Через VPN трафик
+                замера (~50–100 МБ на сервис при 30 Мбит/с) идёт через ваш VPN-сервер.</p>
+            <div id="st-progress" style="display:none"></div>
+            <div id="st-results"></div>
+            <div id="st-history"></div>
         </div>
 
         <div class="card" id="qos-card">
@@ -367,27 +407,21 @@
             </div>
         </div>
         <div class="card" id="netlog-card">
-            <h3><span data-ic="split"></span>Журнал сети — отвалы линка по портам
-                <button class="mini" onclick="loadNetlog()" title="Обновить"><span data-ic="refresh"></span></button></h3>
-            <p class="small">Каждый раз, когда порт теряет сигнал в кабеле («линк»), и с какой скоростью он
-                поднимается обратно. Короткие частые отвалы и подъём на <b>10 Мбит/с вместо 100</b> — почти
-                всегда кабель или разъём (либо порт на той стороне). Наведите на полосу — покажет подробности.</p>
-            <div class="nl-controls">
-                <span class="small">Период:</span>
-                <button class="mini" data-nld="1" onclick="loadNetlog(1)">сутки</button>
-                <button class="mini" data-nld="7" onclick="loadNetlog(7)">неделя</button>
-                <button class="mini" data-nld="30" onclick="loadNetlog(30)">месяц</button>
-                <button class="mini" data-nld="90" onclick="loadNetlog(90)">3 месяца</button>
-                <button class="mini" data-nld="365" onclick="loadNetlog(365)">год</button>
+            <div class="nl-top">
+                <h3><span data-ic="split"></span>Журнал сети</h3>
+                <div class="nl-seg" role="group" aria-label="Период">
+                    <button data-nld="1" onclick="loadNetlog(1)">Сутки</button>
+                    <button data-nld="7" onclick="loadNetlog(7)">Неделя</button>
+                    <button data-nld="30" onclick="loadNetlog(30)">Месяц</button>
+                    <button data-nld="90" onclick="loadNetlog(90)">3 мес</button>
+                    <button data-nld="365" onclick="loadNetlog(365)">Год</button>
+                </div>
+                <button class="mini" onclick="loadNetlog()" title="Обновить"><span data-ic="refresh"></span></button>
             </div>
-            <div class="nl-legend small">
-                <span><i class="nl-sw nl-up"></i>линк есть, полная скорость</span>
-                <span><i class="nl-sw nl-slow"></i>линк на пониженной скорости</span>
-                <span><i class="nl-sw nl-down"></i>линка нет (отвал)</span>
-                <span><i class="nl-sw nl-idle"></i>туннель не работал (VPN выключен)</span>
-                <span><i class="nl-sw nl-off"></i>шлюз выключен / нет данных</span>
-            </div>
-            <div id="nl-body" class="small">Загружаю…</div>
+            <p class="small nl-intro">Когда порт теряет сигнал в кабеле («линк») и с какой скоростью поднимается обратно.
+                Частые короткие отвалы и подъём на <b>10 Мбит/с вместо 100</b> — почти всегда кабель или разъём
+                (либо порт на той стороне). Наведите курсор на график — покажет подробности.</p>
+            <div id="nl-body">Загружаю…</div>
             <div id="nl-tip" class="nl-tip" style="display:none"></div>
         </div>
         <div class="card">

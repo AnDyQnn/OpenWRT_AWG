@@ -39,6 +39,7 @@ pkg openssh-server
 
 # защита от перебора паролей (jail.local лежит в rootfs-overlay/etc/fail2ban)
 pkg fail2ban
+pkg python3                # gw-speedtest.py (интернетометр) — только стандартная библиотека
 pkg python3-systemd        # нужен жиле [sshd] с backend=systemd; иначе не стартует
 
 # система

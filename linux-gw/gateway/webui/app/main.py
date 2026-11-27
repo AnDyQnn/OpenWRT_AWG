@@ -967,7 +967,7 @@ def _netlog_build(days: int) -> dict:
             "down_s": round(sum(sec(s) for s in segs if s["state"] == "down")),
             "slow_s": round(sum(sec(s) for s in segs if s["state"] == "slow")),
             "slow_events": sum(1 for e in events if e["speed"] and full and e["speed"] < full),
-            "segments": segs, "events": events[-400:][::-1], "per_day": per_day,
+            "segments": segs, "events": events[-1500:][::-1], "per_day": per_day,
         })
     return {"days": days, "since": since.isoformat(), "now": now.isoformat(),
             "boots": len(boot_starts), "off": [{"from": a.isoformat(), "to": b.isoformat()} for a, b in off],
@@ -2051,6 +2051,120 @@ def qos_measure(req: QosMeasureReq, request: Request):
     except Exception:
         pass
     _wlog(f"INFO Замер скорости канала запущен (user={_token_user(request)})")
+    return {"ok": True}
+
+
+# ══ Срок аренды DHCP основной сети (минуты … месяцы) ══
+# Пишем плоский filter/dhcp-lease.txt (НЕ .conf: это не опция dnsmasq) — его читает
+# entrypoint gw-dnsmasq и подставляет в dhcp-range. Месяц = 30 дней (dnsmasq знает
+# только m/h/d/w). Что ввёл пользователь — храним отдельно, чтобы показать как было.
+_LEASE_TXT = FILTER_DIR / "dhcp-lease.txt"
+_LEASE_JSON = Path("/etc/awg-setup/dhcp-lease.json")
+_LEASE_LIMITS = {"m": (2, 59 * 24 * 60), "h": (1, 24 * 365), "d": (1, 3650), "mo": (1, 120)}
+
+
+class LeaseReq(BaseModel):
+    value: int
+    unit: str
+
+
+@app.get("/api/dhcp/lease")
+def dhcp_lease_get():
+    try:
+        d = json.loads(_LEASE_JSON.read_text())
+        if d.get("unit") in _LEASE_LIMITS:
+            return {**d, "default": False}
+    except Exception:
+        pass
+    return {"value": 90, "unit": "d", "lease": "90d", "default": True}
+
+
+@app.post("/api/dhcp/lease")
+def dhcp_lease_set(req: LeaseReq, request: Request):
+    if not _is_admin(request):
+        return JSONResponse({"error": "Доступно только администратору"}, status_code=403)
+    if req.unit not in _LEASE_LIMITS:
+        return JSONResponse({"ok": False, "error": "Неизвестная единица"}, status_code=400)
+    lo, hi = _LEASE_LIMITS[req.unit]
+    if not lo <= req.value <= hi:
+        names = {"m": "минут", "h": "часов", "d": "дней", "mo": "месяцев"}
+        return JSONResponse({"ok": False, "error": f"Допустимо от {lo} до {hi} {names[req.unit]}"}, status_code=400)
+    lease = f"{req.value * 30}d" if req.unit == "mo" else f"{req.value}{req.unit}"
+    try:
+        FILTER_DIR.mkdir(parents=True, exist_ok=True)
+        _LEASE_TXT.write_text(lease + "\n")
+        _LEASE_JSON.write_text(json.dumps({"value": req.value, "unit": req.unit, "lease": lease}))
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+    try:
+        subprocess.run(["docker", "restart", "-t", "2", "gw-dnsmasq"], capture_output=True, timeout=20)
+    except Exception:
+        pass
+    _wlog(f"INFO Срок аренды DHCP: {req.value} {req.unit} ({lease}) (user={_token_user(request)})")
+    return {"ok": True, "lease": lease}
+
+
+# ══ Интернетометр: скорость через Яндекс / 2ip / Cloudflare по каждому каналу ══
+# Сам замер — gw-speedtest.py на хосте (нужны маршруты хоста для «напрямую»):
+# запускаем отвязанно, прогресс читаем из /run/awg-setup/speedtest.json,
+# историю — из /etc/awg-setup/speedtest-history.json.
+_ST_STATUS = Path("/run/awg-setup/speedtest.json")
+_ST_HIST = Path("/etc/awg-setup/speedtest-history.json")
+_ST_PATHS = ("direct", "vpn")
+_ST_PROVS = ("yandex", "2ip", "cloudflare")
+
+
+class SpeedtestReq(BaseModel):
+    paths: list[str] = ["direct", "vpn"]
+    providers: list[str] = ["yandex", "2ip", "cloudflare"]
+
+
+def _st_running() -> bool:
+    st = _read_json(_ST_STATUS)
+    if st.get("state") != "running":
+        return False
+    pid = st.get("pid")
+    if pid:
+        return Path(f"/proc/{pid}").exists()
+    # pid ещё не записан (только что запустили) — ждём не дольше 30 с
+    try:
+        return time.time() - _ST_STATUS.stat().st_mtime < 30
+    except Exception:
+        return False
+
+
+@app.get("/api/speedtest")
+def speedtest_get():
+    st = _read_json(_ST_STATUS)
+    if st.get("state") == "running" and not _st_running():
+        st["state"], st["step"] = "error", "замер прерван"
+    try:
+        hist = json.loads(_ST_HIST.read_text()) if _ST_HIST.exists() else []
+    except Exception:
+        hist = []
+    wan = _read("/run/awg-setup/wan-port") or _read("/etc/awg-setup/wan-port")
+    vpn_up = os.path.exists("/sys/class/net/awg0") and _read("/run/awg-mode") != "direct"
+    return {"status": st, "history": hist[-30:][::-1], "wan": wan, "vpn_up": vpn_up}
+
+
+@app.post("/api/speedtest")
+def speedtest_run(req: SpeedtestReq, request: Request):
+    if not _is_admin(request):
+        return JSONResponse({"error": "Доступно только администратору"}, status_code=403)
+    if _st_running():
+        return JSONResponse({"ok": False, "error": "Замер уже идёт"}, status_code=409)
+    paths = [p for p in req.paths if p in _ST_PATHS]
+    provs = [p for p in req.providers if p in _ST_PROVS]
+    if not paths or not provs:
+        return JSONResponse({"ok": False, "error": "Выберите канал и хотя бы один сервис"}, status_code=400)
+    argv = ["python3", "/usr/local/bin/gw-speedtest.py", "--paths", ",".join(paths), "--providers", ",".join(provs)]
+    try:
+        _ST_STATUS.write_text(json.dumps({"state": "running", "step": "запуск", "results": [],
+                                          "paths": paths, "providers": provs}, ensure_ascii=False))
+        subprocess.Popen(_host_detached(argv), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=500)
+    _wlog(f"INFO Интернетометр: замер {','.join(paths)} / {','.join(provs)} (user={_token_user(request)})")
     return {"ok": True}
 
 

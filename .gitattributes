@@ -3,6 +3,7 @@
 
 # Скрипты и CGI запускаются на Linux/OpenWRT — строго LF
 *.sh        text eol=lf
+*.py        text eol=lf
 install.sh  text eol=lf
 
 # CGI-обработчики без расширения — тоже LF
