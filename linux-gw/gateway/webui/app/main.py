@@ -811,6 +811,36 @@ def _netlog_ts(s: str):
     return _dt.datetime.fromisoformat(s)
 
 
+def _netlog_hw(n: str) -> dict:
+    """Живые счётчики ядра по порту (с момента загрузки): драйвер, MAC, MTU,
+    дуплекс, смены линка, ошибки приёма/передачи, CRC, потери. Растущие CRC и
+    смены линка — главный признак плохого кабеля/разъёма."""
+    b = f"/sys/class/net/{n}"
+
+    def rd(x):
+        try:
+            return Path(f"{b}/{x}").read_text().strip()
+        except Exception:
+            return ""
+
+    def num(x):
+        v = rd(x)
+        return int(v) if v.lstrip("-").isdigit() else None
+    drv = ""
+    try:
+        drv = os.path.basename(os.readlink(f"{b}/device/driver"))
+    except Exception:
+        pass
+    try:
+        up_s = int(float(Path("/proc/uptime").read_text().split()[0]))
+    except Exception:
+        up_s = None
+    st = {k: num(f"statistics/{k}") for k in ("rx_bytes", "tx_bytes", "rx_errors", "tx_errors", "rx_dropped",
+                                               "tx_dropped", "rx_crc_errors", "rx_frame_errors", "collisions")}
+    return {"mac": rd("address"), "mtu": rd("mtu"), "duplex": rd("duplex"), "driver": drv,
+            "carrier_changes": num("carrier_changes"), "uptime_s": up_s, **st}
+
+
 def _netlog_build(since, until) -> dict:
     """Журнал за [since, until] (datetime, местное время). Журнал читаем с запасом
     на 14 дней раньше since — чтобы знать состояние порта на начало промежутка
@@ -1004,6 +1034,7 @@ def _netlog_build(since, until) -> dict:
             "slow_s": round(sum(sec(s) for s in segs if s["state"] == "slow")),
             "slow_events": sum(1 for e in events if e["speed"] and full and e["speed"] < full),
             "segments": segs, "events": events[-1500:][::-1], "per_day": per_day,
+            "hw": _netlog_hw(n),
         })
     days = max(1, round((until - since).total_seconds() / 86400))
     return {"days": days, "since": since.isoformat(), "now": now.isoformat(),

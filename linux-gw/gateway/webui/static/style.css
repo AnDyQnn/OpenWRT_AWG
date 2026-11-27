@@ -879,3 +879,27 @@ tr.nl-row-muted td { color: var(--muted); }
 .nl-cal-sel { margin: 0.5rem 0 0.4rem; min-height: 1.2em; }
 .nl-cal-foot { display: flex; flex-wrap: wrap; gap: 0.3rem; justify-content: flex-end; }
 .nl-cal-foot .success { margin-left: auto; }
+/* детализация порта */
+.nl-prow { cursor: pointer; }
+.nl-prow:hover td { background: rgba(255,255,255,0.025); }
+.nl-prow.open td { background: rgba(88,166,255,0.06); border-bottom-color: transparent; }
+.nl-chev { display: inline-block; width: 14px; color: var(--muted); }
+tr.nl-det > td { padding: 0 0.7rem 0.9rem; background: rgba(88,166,255,0.03); }
+.nl-detail { padding-top: 0.2rem; }
+.nl-dhw { font-size: 0.8rem; color: var(--muted); margin-bottom: 0.55rem; }
+.nl-dhw b { color: var(--fg); }
+.nl-dhw code { font-size: 0.76rem; }
+.nl-dts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.45rem; margin-bottom: 0.6rem; }
+.nl-dt { background: var(--bg); border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 6px; padding: 0.4rem 0.55rem;
+    display: flex; flex-direction: column; gap: 0.05rem; min-width: 0; }
+.nl-dt span { font-size: 0.72rem; color: var(--muted); }
+.nl-dt b { font-size: 1rem; font-variant-numeric: tabular-nums; }
+.nl-dt small { font-size: 0.7rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nl-dt.ok { border-left-color: var(--good); }
+.nl-dt.warn { border-left-color: var(--warn); }
+.nl-dt.warn b { color: var(--warn); }
+.nl-dt.bad { border-left-color: var(--bad); }
+.nl-dt.bad b { color: var(--bad); }
+.nl-det-chart { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 0.3rem 0.4rem 0; margin-bottom: 0.5rem; }
+.nl-dev { font-size: 0.78rem; }
+.nl-dev .nl-pr { grid-template-columns: 150px 120px 0 80px auto; }
