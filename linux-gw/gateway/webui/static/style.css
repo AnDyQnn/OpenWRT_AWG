@@ -838,3 +838,44 @@ tr.nl-row-muted td { color: var(--muted); }
 .nl-ports .nl-pers { margin: 0; }
 .nl-ports .nl-pr { grid-template-columns: 104px 82px 14px 82px auto; }
 .nl-role-port { color: #e3b341; border-color: rgba(227,179,65,0.45); background: rgba(227,179,65,0.08); }
+/* статусбар обновления */
+.upd-prog { border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.75rem; background: var(--bg); }
+.upd-prog-top { display: flex; justify-content: space-between; gap: 1rem; font-size: 0.86rem; margin-bottom: 0.4rem; }
+.upd-prog-top span { color: var(--muted); font-variant-numeric: tabular-nums; }
+.upd-bar { height: 8px; border-radius: 4px; background: rgba(255,255,255,0.06); overflow: hidden; }
+.upd-bar i { display: block; height: 100%; border-radius: 4px; background: var(--accent); transition: width 0.8s ease; }
+.upd-prog.run .upd-bar i { background-image: linear-gradient(45deg, rgba(255,255,255,.18) 25%, transparent 25%, transparent 50%, rgba(255,255,255,.18) 50%, rgba(255,255,255,.18) 75%, transparent 75%);
+    background-size: 16px 16px; animation: upd-stripes 0.8s linear infinite; }
+.upd-prog.ok .upd-bar i { background-color: var(--good); }
+.upd-prog.bad .upd-bar i { background-color: var(--bad); }
+@keyframes upd-stripes { from { background-position: 0 0; } to { background-position: 16px 0; } }
+.upd-prog-msg { font-size: 0.84rem; margin: 0.45rem 0 0.35rem; }
+.upd-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.35rem; font-size: 0.76rem; }
+.upd-step { color: var(--muted); padding: 0.05rem 0.4rem; border-radius: 4px; }
+.upd-step.done { color: var(--good); }
+.upd-step.cur { color: var(--accent); background: rgba(88,166,255,0.12); font-weight: 600; }
+.upd-sep { color: #484f58; }
+/* свой календарь журнала сети */
+.nl-range { position: relative; }
+.nl-cal-btn { display: inline-flex; align-items: center; gap: 0.35rem; }
+.nl-cal-btn svg { width: 13px; height: 13px; }
+.nl-cal { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 292px; padding: 0.7rem;
+    background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 32px rgba(0,0,0,0.55); }
+.nl-cal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
+.nl-cal-head b { font-size: 0.92rem; }
+.nl-cal-nav { background: transparent; border: 1px solid var(--border); color: var(--fg); border-radius: 6px; width: 28px; height: 26px;
+    padding: 0; box-shadow: none; transform: none; }
+.nl-cal-nav:hover { border-color: var(--accent); transform: none; }
+.nl-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.nl-cw { text-align: center; font-size: 0.72rem; color: var(--muted); padding: 0.15rem 0 0.3rem; }
+.nl-cd { background: transparent; border: 1px solid transparent; color: var(--fg); border-radius: 6px; height: 32px; padding: 0;
+    font-size: 0.85rem; font-variant-numeric: tabular-nums; box-shadow: none; transform: none; }
+.nl-cd:hover:not(:disabled) { border-color: var(--accent); background: rgba(88,166,255,0.08); transform: none; }
+.nl-cd.out { color: #484f58; }
+.nl-cd.dis { color: #30363d; cursor: not-allowed; }
+.nl-cd.today { border-color: rgba(88,166,255,0.45); }
+.nl-cd.in { background: rgba(88,166,255,0.14); border-radius: 0; }
+.nl-cd.edge { background: var(--accent); color: #0d1117; font-weight: 700; border-radius: 6px; }
+.nl-cal-sel { margin: 0.5rem 0 0.4rem; min-height: 1.2em; }
+.nl-cal-foot { display: flex; flex-wrap: wrap; gap: 0.3rem; justify-content: flex-end; }
+.nl-cal-foot .success { margin-left: auto; }

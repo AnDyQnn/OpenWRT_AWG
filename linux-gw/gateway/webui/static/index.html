@@ -418,11 +418,10 @@
                 </div>
                 <div class="nl-range">
                     <button class="mini" onclick="nlDay(-1)" title="Предыдущий день">‹</button>
-                    <input type="date" id="nl-from" title="С какого дня">
-                    <span class="small">—</span>
-                    <input type="date" id="nl-to" title="По какой день (пусто — один день)">
+                    <button class="mini nl-cal-btn" id="nl-range-go" onclick="nlCalToggle(event)" title="Выбрать день или промежуток">
+                        <span data-ic="list"></span><span id="nl-cal-lbl">Выбрать даты</span></button>
                     <button class="mini" onclick="nlDay(1)" title="Следующий день">›</button>
-                    <button class="mini" id="nl-range-go" onclick="nlRange()">Показать</button>
+                    <div id="nl-cal" class="nl-cal" style="display:none" onclick="event.stopPropagation()"></div>
                 </div>
                 <button class="mini" onclick="loadNetlog()" title="Обновить"><span data-ic="refresh"></span></button>
             </div>

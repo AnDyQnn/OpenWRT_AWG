@@ -33,9 +33,9 @@ mkdir -p /run/awg-setup "$BK"
 _log(){ printf '%s gateway-update: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$WLOG"; }
 
 # Статус для UI: stage, state(idle|running|ok|error), message, версии.
-_status(){ # $1=stage $2=state $3=message
+_status(){ # $1=stage $2=state $3=message [$4=процент 0..100 — для статусбара панели]
     cat > "$STATUS" <<EOF
-{"stage":"$1","state":"$2","message":"$(echo "$3" | sed 's/"/\\"/g')","from":"${CUR_VER:-?}","to":"${NEW_VER:-?}","ts":"$(date -Iseconds)"}
+{"stage":"$1","state":"$2","message":"$(echo "$3" | sed 's/"/\\"/g')","from":"${CUR_VER:-?}","to":"${NEW_VER:-?}","pct":${4:-null},"started":"${UPD_STARTED:-}","ts":"$(date -Iseconds)"}
 EOF
 }
 
@@ -290,9 +290,10 @@ do_apply(){
         _status preflight error "Нужна промежуточная версия (min_from $MIN_FROM)"; rm -f "$LOCK"; return 1
     fi
     _log "APPLY: $CUR_VER → $NEW_VER"
+    UPD_STARTED=$(date -Iseconds)
 
     # PREFLIGHT
-    _status preflight running "Проверки перед накатом"
+    _status preflight running "Проверки перед накатом" 5
     if ! docker info >/dev/null 2>&1; then _status preflight error "Docker недоступен"; rm -f "$LOCK"; return 1; fi
     free_mb=$(df -Pm /opt 2>/dev/null | awk 'NR==2{print $4}')
     if [ -n "$free_mb" ] && [ "$free_mb" -lt 500 ] 2>/dev/null; then
@@ -306,7 +307,7 @@ do_apply(){
     done
 
     # BACKUP (порядок критичен: сначала НОВАЯ страховка, старую чистим на CLEANUP)
-    _status backup running "Резервное копирование перед накатом"
+    _status backup running "Резервное копирование перед накатом" 12
     BDIR=$(gateway-backup.sh update "$CUR_VER" 2>/dev/null | tail -1)
     if [ -z "$BDIR" ] || [ ! -d "$BDIR" ]; then
         _log "APPLY: бэкап не удался — накат НЕ начинаем"; _status backup error "Бэкап не удался, накат отменён"; rm -f "$LOCK"; return 1
@@ -328,13 +329,13 @@ do_apply(){
     _log "APPLY: бэкап $BDIR, :rollback помечен, маркер выставлен"
 
     # CLEANUP (теперь безопасно: новая страховка готова, чистим осиротевший N-2)
-    _status cleanup running "Очистка прошлого поколения"
+    _status cleanup running "Очистка прошлого поколения" 22
     GW_KEEP_BACKUPS="$(grep -oE '"keep_backups"[ ]*:[ ]*[0-9]+' "$CFG" 2>/dev/null | grep -oE '[0-9]+' | head -1)"
     export GW_KEEP_BACKUPS="${GW_KEEP_BACKUPS:-3}"
     gateway-prune.sh $OLD_GEN >/dev/null 2>&1 || _log "APPLY: prune вернул ошибку (не критично)"
 
     # APPLY: код из ветки-канала + образы по digest
-    _status apply running "Загрузка кода и образов $NEW_VER"
+    _status apply running "Загрузка кода $NEW_VER" 28
     ch=$(_channel); [ -n "$ch" ] || ch="$CHANNEL_DEFAULT"
     rm -rf "$STAGING" 2>/dev/null; mkdir -p "$STAGING"
     # тянем тарбол ветки-канала (git не требуется) — того же коммита, что манифест
@@ -349,8 +350,11 @@ do_apply(){
         _log "APPLY: не скачался код ветки $ch — откат"; do_rollback "APPLY:fetch-code" "$BDIR"; rm -f "$LOCK"; return 1
     fi
     # тянем образы по digest и ретегаем в :latest, который ждёт compose
+    n_img=$(echo $SERVICES | wc -w); i_img=0
     for s in $SERVICES; do
         eval "dg=\$DIGEST_$s"
+        i_img=$((i_img + 1))
+        _status apply running "Загрузка образа $s ($i_img из $n_img)" $((30 + (i_img - 1) * 40 / n_img))
         if ! docker pull "$dg" >/dev/null 2>&1; then
             _log "APPLY: docker pull $dg не удался — откат"; do_rollback "APPLY:pull-$s" "$BDIR"; rm -f "$LOCK"; return 1
         fi
@@ -388,7 +392,7 @@ do_apply(){
     # Требования к хосту: пакеты + юниты + файлы-предпосылки. Идёт ПОСЛЕ синка
     # /opt/gateway (файл требований приезжает оттуда) и ДО конфигов fail2ban ниже,
     # чтобы демон уже существовал к моменту, когда ему подкладывают jail.local.
-    _status apply running "Проверка требований к хосту (пакеты, юниты)"
+    _status apply running "Проверка требований к хосту (пакеты, юниты)" 72
     _sync_host_requirements
     # host-конфиги безопасности из rootfs-overlay (sshd-порт, fail2ban) + переприменение
     # фаервола. Без этого security-фичи (нестандартный SSH-порт, fail2ban, закрытие WAN)
@@ -429,11 +433,12 @@ do_apply(){
         _log "APPLY: убираю осиротевший контейнер $orph"
         docker rm -f "$orph" >/dev/null 2>&1
     done
+    _status apply running "Перезапуск сервисов (панель на несколько секунд недоступна)" 82
     ( cd "$GW_DIR" && docker compose up -d ) >/dev/null 2>&1
     sleep 8
 
     # HEALTH-GATE (таймбокс)
-    _status health running "Самодиагностика после наката"
+    _status health running "Самодиагностика после наката" 90
     ok=0
     i=0
     while [ "$i" -lt "$HEALTH_TIMEOUT" ]; do
@@ -451,7 +456,7 @@ do_apply(){
     rm -f "$MARKER" 2>/dev/null
     _log "COMMIT: обновлено до $NEW_VER (страховка :rollback=$CUR_VER сохранена)"
     cat > "$STATUS" <<EOF
-{"stage":"commit","state":"ok","message":"Обновлено до $NEW_VER","from":"$CUR_VER","to":"$NEW_VER","ts":"$(date -Iseconds)"}
+{"stage":"commit","state":"ok","message":"Обновлено до $NEW_VER","from":"$CUR_VER","to":"$NEW_VER","pct":100,"started":"${UPD_STARTED:-}","ts":"$(date -Iseconds)"}
 EOF
     rm -f "$LOCK"; trap - EXIT
     return 0

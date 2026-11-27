@@ -591,22 +591,60 @@ function _updRender(d) {
         avail.textContent = (st.state === 'ok' || st.stage === 'commit') ? 'актуально' : '—';
         btn.style.display = 'none';
     }
-    if (st.message) {
-        const stg = _UPD_STAGES[st.stage] || st.stage || '';
-        const cls = st.state === 'error' ? 'bad' : (st.state === 'ok' ? 'ok' : 'warn');
-        prog.innerHTML = `<span class="badge ${cls}">${_esc(stg)}</span> ${_esc(st.message)}`;
-    } else prog.innerHTML = '';
+    prog.innerHTML = _updProgressHtml(st, running);
+    _updLast = { st, running };
     // если идёт накат — продолжаем опрашивать
     if (running) _updStartPoll(); else _updStopPoll();
 }
 function _updStartPoll() {
     if (_updPollTimer) return;
-    _updPollTimer = setInterval(loadUpdate, 4000);
+    _updPollTimer = setInterval(loadUpdate, 2000);
 }
 function _updStopPoll() { if (_updPollTimer) { clearInterval(_updPollTimer); _updPollTimer = null; } }
 async function loadUpdate() {
-    const d = await api('/api/update/status');
+    let d = null;
+    try { d = await api('/api/update/status'); } catch (e) { d = null; }
+    if (!d && _updLast && _updLast.running) {
+        // во время наката панель сама перезапускается — не теряем статус, ждём
+        const note = $('upd-prog-note');
+        if (note) note.textContent = 'Панель перезапускается — статус обновится через несколько секунд…';
+        return;
+    }
     _updRender(d);
+}
+let _updLast = null;
+// Статусбар обновления: полоса с процентом (его пишет gateway-update.sh), цепочка
+// этапов с галочками, прошедшее время. Откат/ошибка — красным.
+const _UPD_STEPS = [['preflight', 'Проверки'], ['backup', 'Бэкап'], ['cleanup', 'Очистка'], ['apply', 'Загрузка и установка'],
+    ['health', 'Самопроверка'], ['commit', 'Готово']];
+function _updProgressHtml(st, running) {
+    if (!st || !st.message) return '';
+    const isApplyFlow = ['preflight', 'backup', 'cleanup', 'apply', 'health', 'commit', 'rollback'].includes(st.stage);
+    const recent = st.ts && (Date.now() - new Date(st.ts).getTime() < 15 * 60e3);
+    if (!isApplyFlow || (!running && !recent)) {
+        const cls = st.state === 'error' ? 'bad' : (st.state === 'ok' ? 'ok' : 'warn');
+        return `<span class="badge ${cls}">${_esc(_UPD_STAGES[st.stage] || st.stage || '')}</span> ${_esc(st.message)}`;
+    }
+    const bad = st.stage === 'rollback' || st.state === 'error';
+    const done = st.stage === 'commit' && st.state === 'ok';
+    const idx = _UPD_STEPS.findIndex(x => x[0] === st.stage);
+    const pct = done ? 100 : (typeof st.pct === 'number' ? st.pct : Math.max(3, Math.round((idx < 0 ? 0 : idx) / (_UPD_STEPS.length - 1) * 100)));
+    let el = '';
+    if (st.started) {
+        const sec = Math.max(0, Math.round(((done || bad ? new Date(st.ts) : new Date()) - new Date(st.started)) / 1000));
+        el = sec < 60 ? `${sec} с` : `${Math.floor(sec / 60)} мин ${sec % 60} с`;
+    }
+    const steps = _UPD_STEPS.map(([k, t], i) => {
+        const cls = done ? 'done' : bad ? (i < idx ? 'done' : '') : i < idx ? 'done' : i === idx ? 'cur' : '';
+        return `<span class="upd-step ${cls}">${cls === 'done' ? '✓ ' : ''}${t}</span>`;
+    }).join('<span class="upd-sep">›</span>');
+    const head = done ? `Обновлено: ${_esc(st.from || '')} → ${_esc(st.to || '')}` : bad ? 'Откат' : `Обновление ${_esc(st.from || '')} → ${_esc(st.to || '')}`;
+    return `<div class="upd-prog ${bad ? 'bad' : done ? 'ok' : 'run'}">
+        <div class="upd-prog-top"><b>${head}</b><span>${pct}%${el ? ' · ' + el : ''}</span></div>
+        <div class="upd-bar"><i style="width:${pct}%"></i></div>
+        <div class="upd-prog-msg">${_esc(st.message)}</div>
+        <div class="upd-steps">${steps}</div>
+        <div class="small" id="upd-prog-note"></div></div>`;
 }
 function updateModeUi() {
     const m = $('upd-mode') ? $('upd-mode').value : 'manual';
@@ -971,7 +1009,7 @@ function _nlBuckets(spanMs, t0, t1) {
 
 let _nlSeq = 0, _nlRange = null;   // _nlRange = {start, end} — календарные даты
 async function loadNetlog(days) {
-    if (days) { _nlDays = days; _nlRows = 30; _nlRange = null; }
+    if (days) { _nlDays = days; _nlRows = 30; _nlRange = null; _nlCalLabel(); }
     const seq = ++_nlSeq, want = _nlDays, rng = _nlRange;
     document.querySelectorAll('[data-nld]').forEach(b => b.classList.toggle('on', !_nlRange && +b.dataset.nld === _nlDays));
     if ($('nl-range-go')) $('nl-range-go').classList.toggle('on', !!_nlRange);
@@ -1043,19 +1081,79 @@ function _nlPeriods(f, t0) {
     return `<div class="nl-pers">${head}${rest.length ? `<details><summary>ещё ${rest.length}</summary>${rest.map(row).join('')}</details>` : ''}</div>`;
 }
 
-// календарный день или промежуток из полей «с … по …»
-function nlRange() {
-    const a = $('nl-from').value, b = $('nl-to').value || a;
-    if (!a) { toast('Выберите дату', 'warn'); return; }
-    _nlRange = a <= b ? { start: a, end: b } : { start: b, end: a };
+// ── свой календарь (нативный input[type=date] не стилизуется под тему) ──
+// Первый клик — начало, второй — конец; один день — два клика по нему или «Показать».
+const _NL_MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+let _nlCal = null, _nlJournalFrom = null;
+const _isoD = d => `${d.getFullYear()}-${_p2(d.getMonth() + 1)}-${_p2(d.getDate())}`;
+function _nlCalLabel() {
+    const l = $('nl-cal-lbl'); if (!l) return;
+    if (!_nlRange) { l.textContent = 'Выбрать даты'; return; }
+    const f = x => x.slice(8, 10) + '.' + x.slice(5, 7);
+    l.textContent = _nlRange.start === _nlRange.end ? f(_nlRange.start) + '.' + _nlRange.start.slice(0, 4) : `${f(_nlRange.start)} — ${f(_nlRange.end)}`;
+}
+function nlCalToggle(ev) {
+    if (ev) ev.stopPropagation();
+    const box = $('nl-cal');
+    if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+    const base = _nlRange ? new Date(_nlRange.end + 'T12:00:00') : new Date();
+    _nlCal = { y: base.getFullYear(), m: base.getMonth(), a: _nlRange ? _nlRange.start : null, b: _nlRange ? _nlRange.end : null };
+    box.style.display = '';
+    _nlCalRender();
+}
+document.addEventListener('click', () => { const b = $('nl-cal'); if (b) b.style.display = 'none'; });
+function _nlCalRender() {
+    const c = _nlCal, box = $('nl-cal'); if (!c || !box) return;
+    const first = new Date(c.y, c.m, 1), shift = (first.getDay() + 6) % 7;      // неделя с понедельника
+    const today = _isoD(new Date());
+    const lo = c.a && c.b ? (c.a < c.b ? c.a : c.b) : c.a, hi = c.a && c.b ? (c.a < c.b ? c.b : c.a) : c.a;
+    let cells = '';
+    for (let k = 0; k < 42; k++) {
+        const d = new Date(c.y, c.m, 1 - shift + k), iso = _isoD(d);
+        const out = d.getMonth() !== c.m;
+        const dis = iso > today || (_nlJournalFrom && iso < _nlJournalFrom);
+        const inR = lo && hi && iso >= lo && iso <= hi;
+        const cls = [out ? 'out' : '', dis ? 'dis' : '', inR ? 'in' : '', iso === lo || iso === hi ? 'edge' : '', iso === today ? 'today' : ''].join(' ');
+        cells += `<button class="nl-cd ${cls}" ${dis ? 'disabled' : ''} onclick="_nlCalPick('${iso}')">${d.getDate()}</button>`;
+    }
+    const can = !!c.a;
+    const sel = !c.a ? 'Выберите день или начало промежутка' : !c.b ? `С ${c.a.slice(8)}.${c.a.slice(5, 7)} — выберите конец (или «Показать» для одного дня)` :
+        `${lo.slice(8)}.${lo.slice(5, 7)} — ${hi.slice(8)}.${hi.slice(5, 7)}`;
+    box.innerHTML = `<div class="nl-cal-head"><button class="nl-cal-nav" onclick="_nlCalMove(-1)">‹</button>
+            <b>${_NL_MONTHS[c.m]} ${c.y}</b><button class="nl-cal-nav" onclick="_nlCalMove(1)">›</button></div>
+        <div class="nl-cal-grid">${['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'].map(x => `<span class="nl-cw">${x}</span>`).join('')}${cells}</div>
+        <div class="nl-cal-sel small">${sel}</div>
+        <div class="nl-cal-foot">
+            <button class="mini" onclick="_nlCalQuick(0)">Сегодня</button>
+            <button class="mini" onclick="_nlCalQuick(-1)">Вчера</button>
+            <button class="mini" onclick="_nlCalReset()">Сбросить</button>
+            <button class="mini success" ${can ? '' : 'disabled'} onclick="_nlCalApply()">Показать</button></div>`;
+}
+function _nlCalMove(n) { const c = _nlCal; c.m += n; if (c.m < 0) { c.m = 11; c.y--; } if (c.m > 11) { c.m = 0; c.y++; } _nlCalRender(); }
+function _nlCalPick(iso) {
+    const c = _nlCal;
+    if (!c.a || c.b) { c.a = iso; c.b = null; }
+    else { c.b = iso; }
+    _nlCalRender();
+    if (c.a && c.b) setTimeout(_nlCalApply, 120);     // промежуток выбран — сразу показываем
+}
+function _nlCalQuick(off) { const d = new Date(); d.setDate(d.getDate() + off); const iso = _isoD(d); _nlCal.a = iso; _nlCal.b = iso; _nlCalApply(); }
+function _nlCalReset() { $('nl-cal').style.display = 'none'; _nlRange = null; _nlCalLabel(); loadNetlog(_nlDays || 1); }
+function _nlCalApply() {
+    const c = _nlCal; if (!c || !c.a) return;
+    const b = c.b || c.a;
+    _nlRange = c.a <= b ? { start: c.a, end: b } : { start: b, end: c.a };
     _nlRows = 30;
+    $('nl-cal').style.display = 'none';
+    _nlCalLabel();
     loadNetlog();
 }
 function nlDay(shift) {          // стрелки «предыдущий/следующий день»
-    const base = (_nlRange && _nlRange.start) || new Date(Date.now() - 864e5).toISOString().slice(0, 10);
+    const base = (_nlRange && _nlRange.start) || _isoD(new Date());
     const d = new Date(base + 'T12:00:00'); d.setDate(d.getDate() + shift);
-    const iso = `${d.getFullYear()}-${_p2(d.getMonth() + 1)}-${_p2(d.getDate())}`;
-    $('nl-from').value = iso; $('nl-to').value = iso; nlRange();
+    const iso = _isoD(d);
+    if (iso > _isoD(new Date())) return;
+    _nlRange = { start: iso, end: iso }; _nlRows = 30; _nlCalLabel(); loadNetlog();
 }
 
 function _nlRender() {
@@ -1066,13 +1164,14 @@ function _nlRender() {
     let dataFrom = t1;
     d.ifaces.forEach(f => { const g = f.segments.find(g => g.state !== 'off'); if (g) dataFrom = Math.min(dataFrom, _nlT(g.from)); });
     const cropped = dataFrom > t0 + (t1 - t0) * 0.03 && dataFrom < t1;
+    if (cropped && !d.range) _nlJournalFrom = _isoD(new Date(dataFrom));
     if (cropped) t0 = dataFrom;
     const span = Math.max(1, t1 - t0);
     const B = _nlBuckets(span, t0, t1);
     const per = d.range
         ? (_nlDate(t0) === _nlDate(t1 - 1) ? `за ${_nlDate(t0)}` : `за ${_nlDate(t0)}–${_nlDate(t1 - 1)}`)
         : ({ 1: 'за сутки', 7: 'за неделю', 30: 'за месяц', 90: 'за 3 месяца', 365: 'за год' }[_nlDays] || `за ${_nlDays} дн`);
-    if (d.range && $('nl-from') && !$('nl-from').value) { $('nl-from').value = d.since.slice(0, 10); }
+
 
     // ── сводка ──
     const wan = d.ifaces.find(f => f.role === 'WAN') || d.ifaces[0];
