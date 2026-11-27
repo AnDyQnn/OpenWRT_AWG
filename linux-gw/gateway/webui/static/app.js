@@ -1942,6 +1942,7 @@ const _DOCS = [
     ['updates.md', 'Обновление шлюза'],
     ['backup.md', 'Резервные копии'],
     ['networking-failover.md', 'Сеть и failover'],
+    ['network-diagnostics.md', 'Диагностика сети'],
     ['troubleshooting.md', 'Диагностика'],
 ];
 let _docsLoaded = false;

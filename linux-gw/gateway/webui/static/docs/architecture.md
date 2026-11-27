@@ -46,6 +46,11 @@
 | `sysmon` | каждую минуту | рестарт упавших сервисов, чистка памяти |
 | `auto-timezone` | старт | часовой пояс по гео‑IP (через WAN, мимо VPN) |
 | `client-traffic` | сервис | побайтовый учёт скорости по клиентам |
+| `gw-qos` | сервис | распределение скорости между устройствами (CAKE/HTB) |
+| `gw-netmetrics` | сервис | история скорости по всем портам (раз в 5 с → SQLite) для «Журнала сети» |
+| `gw-speedtest.py` | по кнопке | интернетометр: Яндекс / 2ip / Cloudflare, напрямую и через VPN |
+| `gateway-dhcpcd-tune` | при определении WAN | устойчивость WAN к морганию кабеля (`noipv4ll`, `nolink`) |
+| `gateway-update` | по кнопке / расписанию | обновление «по воздуху» с бэкапом, самопроверкой и откатом |
 
 ---
 
@@ -76,6 +81,10 @@
 | `/etc/awg-setup/filter/direct.list` / `direct-cidrs.list` | обход: домены и подсети |
 | `/etc/awg-setup/filter/reservations.conf` | DHCP‑резервы (вечные адреса) |
 | `/etc/awg-setup/split-default.json` | стандартный шаблон обхода (RU) |
+| `/etc/awg-setup/filter/dhcp-lease.txt` | срок аренды DHCP основной сети (задаётся в панели) |
+| `/etc/awg-setup/qos.env` | настройки распределения скорости |
+| `/etc/awg-setup/speedtest-history.json` | история замеров интернетометра |
+| `/var/lib/awg-setup/netmetrics.db` | история скорости по портам (не входит в бэкап) |
 
 Веб‑панель пишет `rules.json` + плоские план‑файлы, а хелперы в `gw-awg`
 (`gw-access-routes`, `gw-access-apply`) их применяют (маршруты и ipset+iptables).
