@@ -1278,7 +1278,7 @@ function _nlRender() {
     h += `<div class="nl-main-wrap">
         <div class="nl-main-head"><div class="nl-btitle">Скорость интернета по портам, Мбит/с <span class="small">(средняя за ${_nlBucketName(met)})</span></div>
         <div class="nl-series">${serDefs.map(q => `<button class="nl-sc${_nlSerOn(q) ? ' on' : ''}" onclick="_nlToggle('${_esc(q.key)}')" title="Показать/скрыть">
-            <i style="background:${_nlColor(q.m)}${q.dir === 'up' ? ';opacity:.55' : ''}"></i>${_esc(q.m.name)} <span>${_esc(_nlRoleTxt(q.m.role))} ${q.dir === 'dn' ? '↓' : '↑'}</span></button>`).join('')}
+            <i style="background:${_nlColor(q.m)}"></i>${_esc(q.m.name)} <span>${_esc(_nlRoleTxt(q.m.role))} ${q.dir === 'dn' ? '↓' : '↑'}</span></button>`).join('')}
         <span class="nl-sc-band"><i class="a-slow"></i>WAN на пониженной скорости</span>
         <span class="nl-sc-band"><i class="a-drop"></i>отвалы</span>
         <span class="nl-sc-band"><i class="a-vpn"></i>VPN пропадал</span>
@@ -1473,18 +1473,27 @@ function _nlRender() {
         // Автомасштаб по трафику: верх шкалы — по 98-му перцентилю, а не по одному
         // максимуму (редкий всплеск не сплющивает график); всплески выше — упираются
         // в верх со стрелкой и настоящей цифрой. Дробные шаги — чтобы и 0.05 Мбит/с было видно.
-        const allV = [];
-        vis.forEach(q => pts(q).forEach(p => { if (p[1] > 0) allV.push(p[1]); }));
-        allV.sort((a, b) => a - b);
-        const vmax = allV.length ? allV[allV.length - 1] : 0;
-        const p98 = allV.length ? allV[Math.floor(0.98 * (allV.length - 1))] : 0;
-        let mx = vmax <= p98 * 1.35 ? vmax : p98;          // нет выбросов — весь диапазон
-        // замер интернетометра — в шкалу, только если он не улетает далеко выше трафика
-        sts.forEach(x => { if (x.down && x.down <= Math.max(mx, 0.05) * 1.6) mx = Math.max(mx, x.down); });
-        mx = Math.max(mx, 0.05);
-        const stepY = [0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find(x => mx * 1.12 / x <= 4) || 2000;
-        const topV = Math.ceil(mx * 1.12 / stepY) * stepY;
-        const Y = v => PH - Math.min(v, topV) / topV * (PH - TOP);
+        // «Зеркальный» график: ↑ отдача — над осью посередине, ↓ загрузка — под ней,
+        // у каждой половины своя шкала (линии не налезают друг на друга).
+        const MID = Math.round((TOP + PH) / 2);
+        const scaleFor = dir => {
+            const allV = [];
+            vis.filter(q => q.dir === dir).forEach(q => pts(q).forEach(p => { if (p[1] > 0) allV.push(p[1]); }));
+            allV.sort((a, b) => a - b);
+            const vmax = allV.length ? allV[allV.length - 1] : 0;
+            const p98 = allV.length ? allV[Math.floor(0.98 * (allV.length - 1))] : 0;
+            let mx = vmax <= p98 * 1.35 ? vmax : p98;      // нет выбросов — весь диапазон
+            // замер интернетометра — в шкалу, только если не улетает далеко выше трафика
+            sts.forEach(x => { const v = dir === 'dn' ? x.down : x.up; if (v && v <= Math.max(mx, 0.05) * 1.6) mx = Math.max(mx, v); });
+            mx = Math.max(mx, 0.05);
+            const step = [0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find(x => mx * 1.12 / x <= 2) || 2000;
+            return { step, top: Math.ceil(mx * 1.12 / step) * step };
+        };
+        const SC = { up: scaleFor('up'), dn: scaleFor('dn') };
+        const topV = SC.dn.top;
+        const Y = (v, dir = 'dn') => dir === 'up'
+            ? MID - Math.min(v, SC.up.top) / SC.up.top * (MID - TOP)
+            : MID + Math.min(v, SC.dn.top) / SC.dn.top * (PH - MID);
         const fmtV = v => v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(0) : v >= 1 ? (+v.toFixed(1)).toString() : (+v.toFixed(2)).toString();
 
         // ── внештатные события — полупрозрачные полосы ПОВЕРХ графика с подписью сверху ──
@@ -1536,27 +1545,34 @@ function _nlRender() {
             <pattern id="${U}h" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
             <line x1="0" y1="0" x2="0" y2="6" stroke="#8b949e" stroke-width="2" opacity=".35"/></pattern>
             <clipPath id="${U}c"><rect x="${LM}" y="0" width="${PW}" height="${H}"/></clipPath>
-            ${vis.map((q, n) => `<linearGradient id="${U}g${n}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${_nlColor(q.m)}" stop-opacity="${q.dir === 'dn' ? .26 : .07}"/>
+            ${vis.map((q, n) => `<linearGradient id="${U}g${n}" x1="0" y1="${q.dir === 'up' ? 0 : 1}" x2="0" y2="${q.dir === 'up' ? 1 : 0}"><stop offset="0" stop-color="${_nlColor(q.m)}" stop-opacity=".26"/>
                 <stop offset="1" stop-color="${_nlColor(q.m)}" stop-opacity="0"/></linearGradient>`).join('')}</defs>`;
         // сетка и оси
-        for (let k = 0; k * stepY <= topV + 1e-9; k++) {
-            const v = +(k * stepY).toFixed(3), y = Math.round(Y(v)) + 0.5;
-            sv += `<line x1="${LM}" y1="${y}" x2="${LM + PW}" y2="${y}" stroke="${v ? _NL_C.grid : '#30363d'}"/>
-                <text x="${LM - 6}" y="${y + 3.5}" fill="${_NL_C.axis}" font-size="10.5" text-anchor="end">${fmtV(v)}</text>`;
-        }
+        ['up', 'dn'].forEach(dir => {
+            const { step, top } = SC[dir];
+            for (let k = 1; k * step <= top + 1e-9; k++) {
+                const v = +(k * step).toFixed(3), y = Math.round(Y(v, dir)) + 0.5;
+                sv += `<line x1="${LM}" y1="${y}" x2="${LM + PW}" y2="${y}" stroke="${_NL_C.grid}"/>
+                    <text x="${LM - 6}" y="${y + 3.5}" fill="${_NL_C.axis}" font-size="10.5" text-anchor="end">${fmtV(v)}</text>`;
+            }
+        });
+        sv += `<line x1="${LM}" y1="${MID + 0.5}" x2="${LM + PW}" y2="${MID + 0.5}" stroke="#484f58"/>
+            <text x="${LM - 6}" y="${MID + 3.5}" fill="${_NL_C.axis}" font-size="10.5" text-anchor="end">0</text>
+            <text x="${LM + 6}" y="${TOP + 11}" fill="#c9d1d9" font-size="10.5" font-weight="600" opacity=".75">↑ отдача (из офиса)</text>
+            <text x="${LM + 6}" y="${PH - 5}" fill="#c9d1d9" font-size="10.5" font-weight="600" opacity=".75">↓ загрузка (в офис)</text>`;
         sv += axisSvg(W, X, BTOP, PH, PH + 17, LM + 14);
         // серии скорости
-        sv += '<g clip-path="url(#${U}c)">';
+        sv += `<g clip-path="url(#${U}c)">`;
         const gap = met ? met.bucket_s * 1000 * 2.5 : 0;
         vis.forEach((q, n) => {
             const P = pts(q), runs = []; let cur = [];
-            P.forEach((p, k) => { if (k && p[0] - P[k - 1][0] > gap) { runs.push(cur); cur = []; } cur.push([X(p[0] + met.bucket_s * 500), Y(p[1])]); });
+            P.forEach((p, k) => { if (k && p[0] - P[k - 1][0] > gap) { runs.push(cur); cur = []; } cur.push([X(p[0] + met.bucket_s * 500), Y(p[1], q.dir)]); });
             if (cur.length) runs.push(cur);
             runs.forEach(r => {
                 if (r.length === 1) { sv += `<circle cx="${r[0][0].toFixed(1)}" cy="${r[0][1].toFixed(1)}" r="3" fill="${_nlColor(q.m)}"/>`; return; }
                 const line = _nlSmooth(r);
-                if (q.dir === 'dn') sv += `<path d="${line} L${r[r.length - 1][0].toFixed(1)},${PH} L${r[0][0].toFixed(1)},${PH} Z" fill="url(#${U}g${n})"/>`;
-                sv += `<path d="${line}" fill="none" stroke="${_nlColor(q.m)}" stroke-width="${q.dir === 'dn' ? 2 : 1.4}" ${q.dir === 'up' ? 'stroke-dasharray="4 3" stroke-opacity=".8"' : ''} stroke-linejoin="round"/>`;
+                sv += `<path d="${line} L${r[r.length - 1][0].toFixed(1)},${MID} L${r[0][0].toFixed(1)},${MID} Z" fill="url(#${U}g${n})"/>`;
+                sv += `<path d="${line}" fill="none" stroke="${_nlColor(q.m)}" stroke-width="1.8" stroke-linejoin="round"/>`;
             });
         });
         // полосы событий поверх графика
@@ -1572,9 +1588,13 @@ function _nlRender() {
         });
         // замеры интернетометра — ромбы на уровне измеренной скорости
         sts.forEach(x => {
-            const tx = X(_nlT(x.ts)), y = Y(x.down || 0); if (tx < LM || !x.down) return;
-            sv += `<path d="M${tx.toFixed(1)},${(y - 6).toFixed(1)} l6,6 l-6,6 l-6,-6 Z" fill="#f0f6fc" stroke="#0d1117" stroke-width="1.2"/>`;
-            if (x.down > topV) sv += `<text x="${(tx + 9).toFixed(1)}" y="${(y + 4).toFixed(1)}" fill="#f0f6fc" font-size="10" font-weight="600">▲ ${fmtV(x.down)}</text>`;
+            const tx = X(_nlT(x.ts)); if (tx < LM) return;
+            [['dn', x.down], ['up', x.up]].forEach(([dir, v]) => {
+                if (!v) return;
+                const y = Y(v, dir);
+                sv += `<path d="M${tx.toFixed(1)},${(y - 6).toFixed(1)} l6,6 l-6,6 l-6,-6 Z" fill="#f0f6fc" stroke="#0d1117" stroke-width="1.2"/>`;
+                if (v > SC[dir].top) sv += `<text x="${(tx + 9).toFixed(1)}" y="${(y + 4).toFixed(1)}" fill="#f0f6fc" font-size="10" font-weight="600">${dir === 'up' ? '▲' : '▼'} ${fmtV(v)}</text>`;
+            });
         });
         sv += '</g>';
         // подписи событий сверху: раскладываем по рядам, чтобы не наезжали
@@ -1594,14 +1614,16 @@ function _nlRender() {
         });
         // цифры на пиках ↓
         const lab = [];
-        vis.filter(q => q.dir === 'dn').forEach(q => { const P = pts(q); P.forEach((p, k) => {
-            if (p[1] > topV * 0.04 && p[1] >= (P[k - 1] || [0, 0])[1] && p[1] >= (P[k + 1] || [0, 0])[1]) lab.push({ v: p[1], x: X(p[0] + met.bucket_s * 500), c: _nlColor(q.m) });
+        vis.forEach(q => { const P = pts(q), top = SC[q.dir].top; P.forEach((p, k) => {
+            if (p[1] > top * 0.06 && p[1] >= (P[k - 1] || [0, 0])[1] && p[1] >= (P[k + 1] || [0, 0])[1]) lab.push({ v: p[1], dir: q.dir, x: X(p[0] + met.bucket_s * 500), c: _nlColor(q.m) });
         }); });
         const placed = [];
         lab.sort((a, b) => b.v - a.v).forEach(o => {
             if (placed.length >= 8) return;
-            const txt = (o.v > topV ? '▲ ' : '') + fmtV(o.v), w = txt.length * 6.5 + 10, ty = o.v > topV ? TOP + 12 : Y(o.v) - 9;
-            if (ty < TOP + 4 || o.x < LM + w / 2 || o.x > LM + PW - w / 2 || placed.some(p => Math.abs(p.x - o.x) < (w + p.w) / 2 + 4 && Math.abs(p.y - ty) < 16)) return;
+            const over = o.v > SC[o.dir].top, up = o.dir === 'up';
+            const txt = (over ? (up ? '▲ ' : '▼ ') : '') + fmtV(o.v), w = txt.length * 6.5 + 10;
+            const ty = up ? (over ? TOP + 12 : Y(o.v, 'up') - 9) : (over ? PH - 6 : Y(o.v, 'dn') + 17);
+            if (ty < TOP + 4 || ty > PH || o.x < LM + w / 2 || o.x > LM + PW - w / 2 || placed.some(p => Math.abs(p.x - o.x) < (w + p.w) / 2 + 4 && Math.abs(p.y - ty) < 16)) return;
             placed.push({ x: o.x, y: ty, w });
             sv += `<g pointer-events="none"><rect x="${(o.x - w / 2).toFixed(1)}" y="${(ty - 10).toFixed(1)}" width="${w}" height="14" rx="3" fill="#0d1117" stroke="${o.c}" stroke-opacity=".7"/>
                 <text x="${o.x.toFixed(1)}" y="${(ty + 0.5).toFixed(1)}" fill="#e6edf3" font-size="10.5" font-weight="600" text-anchor="middle">${txt}</text></g>`;
@@ -1631,7 +1653,7 @@ function _nlRender() {
                 vis.forEach((q, n) => {
                     const p = pts(q).find(p => p[0] <= t && t < p[0] + bs), c = xps[n];
                     if (!p) { c.setAttribute('visibility', 'hidden'); return; }
-                    c.setAttribute('cx', X(p[0] + bs / 2).toFixed(1)); c.setAttribute('cy', Y(p[1]).toFixed(1)); c.setAttribute('visibility', 'visible');
+                    c.setAttribute('cx', X(p[0] + bs / 2).toFixed(1)); c.setAttribute('cy', Y(p[1], q.dir).toFixed(1)); c.setAttribute('visibility', 'visible');
                     html += `<div class="nl-tr"><i style="background:${_nlColor(q.m)}"></i>${_esc(q.m.name)} <span>${q.dir === 'dn' ? '↓' : '↑'} ср. / пик</span><b>${p[1]} / ${p[2]}</b></div>`;
                 });
             }
