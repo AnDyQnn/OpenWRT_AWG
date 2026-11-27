@@ -1565,8 +1565,8 @@ function _nlRender() {
         });
         sv += `<line x1="${LM}" y1="${MID + 0.5}" x2="${LM + PW}" y2="${MID + 0.5}" stroke="#484f58"/>
             <text x="${LM - 6}" y="${MID + 3.5}" fill="${_NL_C.axis}" font-size="10.5" text-anchor="end">0</text>
-            <text x="${LM + 6}" y="${TOP + 11}" fill="#c9d1d9" font-size="10.5" font-weight="600" opacity=".75">↑ отдача (из офиса), ${SC.up.top < 1 ? 'Кбит/с' : 'Мбит/с'}</text>
-            <text x="${LM + 6}" y="${PH - 5}" fill="#c9d1d9" font-size="10.5" font-weight="600" opacity=".75">↓ загрузка (в офис), ${SC.dn.top < 1 ? 'Кбит/с' : 'Мбит/с'}</text>`;
+            <text x="${LM + 6}" y="${TOP + 11}" fill="#c9d1d9" font-size="10.5" font-weight="600" opacity=".75">↑ отдача, ${SC.up.top < 1 ? 'Кбит/с' : 'Мбит/с'}</text>
+            <text x="${LM + 6}" y="${PH - 5}" fill="#c9d1d9" font-size="10.5" font-weight="600" opacity=".75">↓ загрузка, ${SC.dn.top < 1 ? 'Кбит/с' : 'Мбит/с'}</text>`;
         sv += axisSvg(W, X, BTOP, PH, PH + 17, LM + 14, T0, t1);
         if (cropX) sv += `<text x="${LM + PW - 4}" y="${TOP + 11}" fill="${_NL_C.axis}" font-size="10.5" text-anchor="end">скорость пишется с ${_nlFmt(covF)} — показано с этого момента</text>`;
         // серии скорости
@@ -1578,9 +1578,13 @@ function _nlRender() {
             if (cur.length) runs.push(cur);
             runs.forEach(r => {
                 if (r.length === 1) { sv += `<circle cx="${r[0][0].toFixed(1)}" cy="${r[0][1].toFixed(1)}" r="3" fill="${_nlColor(q.m)}"/>`; return; }
-                const line = _nlSmooth(r);
+                // без сглаживания: прямые отрезки между точками — значения и пики на своих местах
+                const line = 'M' + r.map(p => `${p[0].toFixed(1)},${p[1].toFixed(1)}`).join(' L');
                 sv += `<path d="${line} L${r[r.length - 1][0].toFixed(1)},${MID} L${r[0][0].toFixed(1)},${MID} Z" fill="url(#${U}g${n})"/>`;
-                sv += `<path d="${line}" fill="none" stroke="${_nlColor(q.m)}" stroke-width="1.8" stroke-linejoin="round"/>`;
+                sv += `<path d="${line}" fill="none" stroke="${_nlColor(q.m)}" stroke-width="1.6" stroke-linejoin="round"/>`;
+                // маркеры точек, если они не слипаются
+                if (r.length > 1 && (r[r.length - 1][0] - r[0][0]) / (r.length - 1) >= 7)
+                    r.forEach(p => { sv += `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="2" fill="${_nlColor(q.m)}"/>`; });
             });
         });
         // полосы событий поверх графика
