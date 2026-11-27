@@ -1436,12 +1436,22 @@ function _nlRender() {
         const wanF = d.ifaces.find(f => f.role === 'WAN');
         const vis = serDefs.filter(q => only ? q.m.name === only : _nlSerOn(q));
         const pts = q => q.m.t.map((t, k) => [t * 1000, q.m[q.dir][k], q.m[q.dir + '_pk'][k]]).filter(p => p[0] >= t0 - met.bucket_s * 1000);
-        let mx = 1;
-        vis.forEach(q => pts(q).forEach(p => { if (p[1] > mx) mx = p[1]; }));
-        sts.forEach(x => { if (x.down > mx) mx = x.down; });
-        const stepY = [1, 2, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find(x => mx / x <= 4) || 2000;
-        const topV = Math.ceil(mx * 1.1 / stepY) * stepY;
-        const Y = v => PH - v / topV * (PH - TOP);
+        // Автомасштаб по трафику: верх шкалы — по 98-му перцентилю, а не по одному
+        // максимуму (редкий всплеск не сплющивает график); всплески выше — упираются
+        // в верх со стрелкой и настоящей цифрой. Дробные шаги — чтобы и 0.05 Мбит/с было видно.
+        const allV = [];
+        vis.forEach(q => pts(q).forEach(p => { if (p[1] > 0) allV.push(p[1]); }));
+        allV.sort((a, b) => a - b);
+        const vmax = allV.length ? allV[allV.length - 1] : 0;
+        const p98 = allV.length ? allV[Math.floor(0.98 * (allV.length - 1))] : 0;
+        let mx = vmax <= p98 * 1.35 ? vmax : p98;          // нет выбросов — весь диапазон
+        // замер интернетометра — в шкалу, только если он не улетает далеко выше трафика
+        sts.forEach(x => { if (x.down && x.down <= Math.max(mx, 0.05) * 1.6) mx = Math.max(mx, x.down); });
+        mx = Math.max(mx, 0.05);
+        const stepY = [0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1, 2, 2.5, 5, 10, 20, 25, 50, 100, 200, 250, 500, 1000].find(x => mx * 1.12 / x <= 4) || 2000;
+        const topV = Math.ceil(mx * 1.12 / stepY) * stepY;
+        const Y = v => PH - Math.min(v, topV) / topV * (PH - TOP);
+        const fmtV = v => v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(0) : v >= 1 ? (+v.toFixed(1)).toString() : (+v.toFixed(2)).toString();
 
         // ── внештатные события — полупрозрачные полосы ПОВЕРХ графика с подписью сверху ──
         const ann = [];
@@ -1495,10 +1505,10 @@ function _nlRender() {
             ${vis.map((q, n) => `<linearGradient id="${U}g${n}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${_nlColor(q.m)}" stop-opacity="${q.dir === 'dn' ? .26 : .07}"/>
                 <stop offset="1" stop-color="${_nlColor(q.m)}" stop-opacity="0"/></linearGradient>`).join('')}</defs>`;
         // сетка и оси
-        for (let v = 0; v <= topV; v += stepY) {
-            const y = Math.round(Y(v)) + 0.5;
+        for (let k = 0; k * stepY <= topV + 1e-9; k++) {
+            const v = +(k * stepY).toFixed(3), y = Math.round(Y(v)) + 0.5;
             sv += `<line x1="${LM}" y1="${y}" x2="${LM + PW}" y2="${y}" stroke="${v ? _NL_C.grid : '#30363d'}"/>
-                <text x="${LM - 6}" y="${y + 3.5}" fill="${_NL_C.axis}" font-size="10.5" text-anchor="end">${v}</text>`;
+                <text x="${LM - 6}" y="${y + 3.5}" fill="${_NL_C.axis}" font-size="10.5" text-anchor="end">${fmtV(v)}</text>`;
         }
         sv += axisSvg(W, X, BTOP, PH, PH + 17, LM + 14);
         // серии скорости
@@ -1530,6 +1540,7 @@ function _nlRender() {
         sts.forEach(x => {
             const tx = X(_nlT(x.ts)), y = Y(x.down || 0); if (tx < LM || !x.down) return;
             sv += `<path d="M${tx.toFixed(1)},${(y - 6).toFixed(1)} l6,6 l-6,6 l-6,-6 Z" fill="#f0f6fc" stroke="#0d1117" stroke-width="1.2"/>`;
+            if (x.down > topV) sv += `<text x="${(tx + 9).toFixed(1)}" y="${(y + 4).toFixed(1)}" fill="#f0f6fc" font-size="10" font-weight="600">▲ ${fmtV(x.down)}</text>`;
         });
         sv += '</g>';
         // подписи событий сверху: раскладываем по рядам, чтобы не наезжали
@@ -1550,12 +1561,12 @@ function _nlRender() {
         // цифры на пиках ↓
         const lab = [];
         vis.filter(q => q.dir === 'dn').forEach(q => { const P = pts(q); P.forEach((p, k) => {
-            if (p[1] > 0.5 && p[1] >= (P[k - 1] || [0, 0])[1] && p[1] >= (P[k + 1] || [0, 0])[1]) lab.push({ v: p[1], x: X(p[0] + met.bucket_s * 500), c: _nlColor(q.m) });
+            if (p[1] > topV * 0.04 && p[1] >= (P[k - 1] || [0, 0])[1] && p[1] >= (P[k + 1] || [0, 0])[1]) lab.push({ v: p[1], x: X(p[0] + met.bucket_s * 500), c: _nlColor(q.m) });
         }); });
         const placed = [];
         lab.sort((a, b) => b.v - a.v).forEach(o => {
             if (placed.length >= 8) return;
-            const txt = o.v >= 10 ? o.v.toFixed(0) : o.v.toFixed(1), w = txt.length * 6.5 + 10, ty = Y(o.v) - 9;
+            const txt = (o.v > topV ? '▲ ' : '') + fmtV(o.v), w = txt.length * 6.5 + 10, ty = o.v > topV ? TOP + 12 : Y(o.v) - 9;
             if (ty < TOP + 4 || o.x < LM + w / 2 || o.x > LM + PW - w / 2 || placed.some(p => Math.abs(p.x - o.x) < (w + p.w) / 2 + 4 && Math.abs(p.y - ty) < 16)) return;
             placed.push({ x: o.x, y: ty, w });
             sv += `<g pointer-events="none"><rect x="${(o.x - w / 2).toFixed(1)}" y="${(ty - 10).toFixed(1)}" width="${w}" height="14" rx="3" fill="#0d1117" stroke="${o.c}" stroke-opacity=".7"/>
