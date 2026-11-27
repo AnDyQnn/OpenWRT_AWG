@@ -826,3 +826,4 @@ tr.nl-row-muted td { color: var(--muted); }
 .nl-sc-band i.a-drop { background: rgba(248,81,73,0.3); border-top: 2px solid var(--bad); }
 .nl-sc-band i.a-vpn { background: rgba(63,185,167,0.25); border-top: 2px solid #3fb9a7; }
 .nl-sc-band i.a-off { background: repeating-linear-gradient(135deg, #8b949e 0 2px, transparent 2px 5px); border-top: 2px solid #8b949e; }
+.sec-line.warn { border-left-color: var(--warn, #d29922); }

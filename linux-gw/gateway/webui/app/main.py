@@ -603,6 +603,8 @@ def security_stats(request: Request):
     failed_logins = 0
     recent = []
     max_recent = 0
+    max_recent_own = 0      # то же, но из своей сети/VPN — это опечатки, не взлом
+    own_ip = ""
     try:
         p = Path("/var/log/panel-auth.log")
         if p.exists():
@@ -628,7 +630,18 @@ def security_stats(request: Request):
                     by_ip[ip] = by_ip.get(ip, 0) + 1
             failed_logins = len(lines)
             recent = lines[-6:]
-            max_recent = max(by_ip.values()) if by_ip else 0
+            # свои источники (шлюз, офис, VPN) fail2ban не банит — и «Атакой» их не считаем
+            def _own(ip):
+                try:
+                    a = ipaddress.ip_address(ip)
+                    return a.is_loopback or a.is_private
+                except Exception:
+                    return False
+            ext = {k: v for k, v in by_ip.items() if not _own(k)}
+            own = {k: v for k, v in by_ip.items() if _own(k)}
+            max_recent = max(ext.values()) if ext else 0
+            if own:
+                own_ip, max_recent_own = max(own.items(), key=lambda kv: kv[1])
     except Exception:
         pass
     # «Только что заблокировали» — окно ~15с после бана, чтобы «Атаку» было ВИДНО
@@ -655,12 +668,20 @@ def security_stats(request: Request):
     # Уровень = по АКТИВНОЙ угрозе. >=5 неудач (порог бана) ИЛИ только что заблокировали
     # — Атака (держим ~15с, видно); >=2 — Подозрение; иначе Штатно. Когда забаненный
     # «отлежался» 15с — угроза нейтрализована, состояние снова Штатно.
+    # Свои адреса максимум «Подозрение» (кто-то из своих ошибается паролем).
     level = "ok"
-    if max_recent >= 2:
+    if max_recent >= 2 or max_recent_own >= 3:
         level = "warn"
     if max_recent >= 5 or recently_banned:
         level = "alarm"
-    return {"level": level, "banned_now": banned_now, "banned_total": banned_total,
+    note = ""
+    if level == "alarm":
+        note = "подбор пароля с внешнего адреса"
+    elif max_recent_own >= 3 and max_recent < 2:
+        note = f"неудачные входы из своей сети ({own_ip}, {_src_kind(own_ip)}) — скорее опечатка в пароле"
+    elif level == "warn":
+        note = "неудачные входы с внешнего адреса"
+    return {"level": level, "note": note, "banned_now": banned_now, "banned_total": banned_total,
             "banned_ips": banned_ips[:20], "wan_drops": wan_drops,
             "failed_logins": failed_logins, "active_threat": max_recent,
             "jails": jails, "recent": recent}
